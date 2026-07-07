@@ -40,16 +40,6 @@ class AppDrawer extends ConsumerWidget {
           onTap: () => router.go('/home'),
         ),
         ListTile(
-          leading: const Icon(Icons.support_agent_outlined),
-          title: const Text('답변자 홈'),
-          onTap: () => router.go('/helper/home'),
-        ),
-        ListTile(
-          leading: const Icon(Icons.person_add_alt_outlined),
-          title: const Text('답변자 신청'),
-          onTap: () => router.go('/helper/apply'),
-        ),
-        ListTile(
           leading: const Icon(Icons.account_circle_outlined),
           title: const Text('내 프로필'),
           onTap: () => router.go('/profile'),

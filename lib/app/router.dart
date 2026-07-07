@@ -5,7 +5,6 @@ import '../features/admin/admin_helper_applications_page.dart';
 import '../features/admin/admin_home_page.dart';
 import '../features/answers/answer_form_page.dart';
 import '../features/auth/auth_page.dart';
-import '../features/auth/onboarding_page.dart';
 import '../features/auth/splash_page.dart';
 import '../features/helper_application/helper_application_page.dart';
 import '../features/helper_application/helper_home_page.dart';
@@ -22,10 +21,6 @@ final routerProvider = Provider<GoRouter>((ref) {
     routes: [
       GoRoute(path: '/', builder: (context, state) => const SplashPage()),
       GoRoute(path: '/auth', builder: (context, state) => const AuthPage()),
-      GoRoute(
-        path: '/onboarding',
-        builder: (context, state) => const OnboardingPage(),
-      ),
       GoRoute(
         path: '/home',
         builder: (context, state) => const QuestionHomePage(),

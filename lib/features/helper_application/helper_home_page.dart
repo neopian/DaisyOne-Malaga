@@ -26,6 +26,11 @@ class HelperHomePage extends ConsumerWidget {
           },
           icon: const Icon(Icons.refresh),
         ),
+        IconButton.filledTonal(
+          tooltip: '질문자로 전환',
+          onPressed: () => context.go('/home'),
+          icon: const Icon(Icons.home_outlined),
+        ),
       ],
       body: AsyncValueView(
         value: application,

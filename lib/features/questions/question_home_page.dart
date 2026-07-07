@@ -14,6 +14,8 @@ import '../../shared/widgets/status_chip.dart';
 import '../profile/profile_repository.dart';
 import 'question_repository.dart';
 
+const _currentLocationZoom = 13.0;
+
 class QuestionHomePage extends ConsumerStatefulWidget {
   const QuestionHomePage({super.key});
 
@@ -22,6 +24,7 @@ class QuestionHomePage extends ConsumerStatefulWidget {
 }
 
 class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
+  late final MapController _mapController;
   DeviceCoordinates? _currentCoordinates;
   LatLngBounds? _visibleBounds;
   bool _isResolvingLocation = false;
@@ -30,24 +33,38 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
   @override
   void initState() {
     super.initState();
+    _mapController = MapController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshCurrentLocation();
     });
   }
 
-  Future<void> _refreshCurrentLocation() async {
-    if (_isResolvingLocation) return;
+  @override
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
+  }
+
+  Future<DeviceCoordinates?> _refreshCurrentLocation() async {
+    if (_isResolvingLocation) return _currentCoordinates;
     setState(() {
       _isResolvingLocation = true;
       _locationError = null;
     });
     try {
       final coordinates = await const LocationService().getCurrentCoordinates();
-      if (!mounted) return;
-      setState(() => _currentCoordinates = coordinates);
+      if (!mounted) return null;
+      final shouldResetBounds =
+          _mapIdentity(_currentCoordinates) != _mapIdentity(coordinates);
+      setState(() {
+        _currentCoordinates = coordinates;
+        if (shouldResetBounds) _visibleBounds = null;
+      });
+      return coordinates;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() => _locationError = _locationMessage(error));
+      return null;
     } finally {
       if (mounted) setState(() => _isResolvingLocation = false);
     }
@@ -57,6 +74,16 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
     ref.invalidate(questionsProvider);
     ref.invalidate(currentProfileProvider);
     _refreshCurrentLocation();
+  }
+
+  Future<void> _moveToCurrentLocation() async {
+    final coordinates = _currentCoordinates ?? await _refreshCurrentLocation();
+    if (!mounted || coordinates == null) return;
+    setState(() => _locationError = null);
+    _mapController.move(
+      LatLng(coordinates.latitude, coordinates.longitude),
+      _currentLocationZoom,
+    );
   }
 
   String _locationMessage(Object error) {
@@ -69,7 +96,8 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
     final profile = ref.watch(currentProfileProvider).asData?.value;
     final items = questions.asData?.value ?? const <Question>[];
     final visibleItems = _visibleQuestions(items);
-    final isLoading = questions.isLoading && !questions.hasValue;
+    final isLoading =
+        (questions.isLoading && !questions.hasValue) || _visibleBounds == null;
 
     return Scaffold(
       drawer: const AppDrawer(),
@@ -77,6 +105,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
         children: [
           Positioned.fill(
             child: _MapSurface(
+              mapController: _mapController,
               questions: items,
               currentCoordinates: _currentCoordinates,
               onVisibleBoundsChanged: _handleVisibleBoundsChanged,
@@ -87,6 +116,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
             isLoading: isLoading || _isResolvingLocation,
             hasCurrentLocation: _currentCoordinates != null,
             onRefresh: _refreshData,
+            onSwitchRole: () => context.go('/helper/home'),
           ),
           if (questions.hasError)
             Positioned(
@@ -112,7 +142,15 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
             questions: visibleItems,
             profile: profile,
             isLoading: isLoading,
-            onRefresh: _refreshData,
+          ),
+          Positioned(
+            right: 18,
+            bottom: 264,
+            child: _CircleMapButton(
+              tooltip: '현재 위치로 이동',
+              icon: _isResolvingLocation ? Icons.sync : Icons.my_location,
+              onTap: _moveToCurrentLocation,
+            ),
           ),
           Positioned(
             right: 18,
@@ -131,16 +169,17 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
 
   List<Question> _visibleQuestions(List<Question> questions) {
     final bounds = _visibleBounds;
+    if (bounds == null) return const <Question>[];
     return questions.where((question) {
       final latitude = question.latitude;
       final longitude = question.longitude;
       if (latitude == null || longitude == null) return false;
-      if (bounds == null) return true;
       return bounds.contains(LatLng(latitude, longitude));
     }).toList();
   }
 
-  void _handleVisibleBoundsChanged(LatLngBounds bounds) {
+  void _handleVisibleBoundsChanged(String mapIdentity, LatLngBounds bounds) {
+    if (mapIdentity != _mapIdentity(_currentCoordinates)) return;
     final current = _visibleBounds;
     if (current != null && _sameBounds(current, bounds)) return;
     if (!mounted) return;
@@ -155,6 +194,14 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
         (a.west - b.west).abs() < tolerance;
   }
 }
+
+String _mapIdentity(DeviceCoordinates? coordinates) {
+  if (coordinates == null) return 'spain-map';
+  return 'spain-map-${coordinates.latitude.toStringAsFixed(4)}-${coordinates.longitude.toStringAsFixed(4)}';
+}
+
+typedef _VisibleBoundsChanged =
+    void Function(String mapIdentity, LatLngBounds bounds);
 
 class QuestionCard extends StatelessWidget {
   const QuestionCard({super.key, required this.question});
@@ -173,12 +220,14 @@ class _MapTopBar extends StatelessWidget {
     required this.isLoading,
     required this.hasCurrentLocation,
     required this.onRefresh,
+    required this.onSwitchRole,
   });
 
   final AppUser? profile;
   final bool isLoading;
   final bool hasCurrentLocation;
   final VoidCallback onRefresh;
+  final VoidCallback onSwitchRole;
 
   @override
   Widget build(BuildContext context) {
@@ -259,6 +308,12 @@ class _MapTopBar extends StatelessWidget {
             icon: isLoading ? Icons.sync : Icons.refresh,
             onTap: onRefresh,
           ),
+          const SizedBox(width: 8),
+          _CircleMapButton(
+            tooltip: '답변자로 전환',
+            icon: Icons.support_agent_outlined,
+            onTap: onSwitchRole,
+          ),
         ],
       ),
     );
@@ -274,17 +329,21 @@ class _MapTopBar extends StatelessWidget {
 
 class _MapSurface extends StatelessWidget {
   const _MapSurface({
+    required this.mapController,
     required this.questions,
     required this.currentCoordinates,
     required this.onVisibleBoundsChanged,
   });
 
+  final MapController mapController;
   final List<Question> questions;
   final DeviceCoordinates? currentCoordinates;
-  final ValueChanged<LatLngBounds> onVisibleBoundsChanged;
+  final _VisibleBoundsChanged onVisibleBoundsChanged;
 
   @override
   Widget build(BuildContext context) {
+    final currentCoordinates = this.currentCoordinates;
+    final mapIdentity = _mapIdentity(currentCoordinates);
     final markers = questions
         .where(
           (question) => question.latitude != null && question.longitude != null,
@@ -294,12 +353,11 @@ class _MapSurface extends StatelessWidget {
             point: LatLng(question.latitude!, question.longitude!),
             width: 118,
             height: 72,
-            alignment: Alignment.bottomCenter,
+            alignment: Alignment.topCenter,
             child: _QuestionPin(question: question),
           ),
         )
         .toList();
-    final currentCoordinates = this.currentCoordinates;
     if (currentCoordinates != null) {
       markers.add(
         Marker(
@@ -316,16 +374,13 @@ class _MapSurface extends StatelessWidget {
     }
 
     return FlutterMap(
-      key: ValueKey(
-        currentCoordinates == null
-            ? 'spain-map'
-            : 'spain-map-${currentCoordinates.latitude.toStringAsFixed(4)}-${currentCoordinates.longitude.toStringAsFixed(4)}',
-      ),
+      key: ValueKey(mapIdentity),
+      mapController: mapController,
       options: MapOptions(
         initialCenter: currentCoordinates == null
             ? const LatLng(SpainGeo.defaultLatitude, SpainGeo.defaultLongitude)
             : LatLng(currentCoordinates.latitude, currentCoordinates.longitude),
-        initialZoom: currentCoordinates == null ? 5.8 : 13,
+        initialZoom: currentCoordinates == null ? 5.8 : _currentLocationZoom,
         minZoom: 5,
         maxZoom: 17,
         cameraConstraint: CameraConstraint.containCenter(
@@ -343,8 +398,14 @@ class _MapSurface extends StatelessWidget {
               InteractiveFlag.doubleTapZoom |
               InteractiveFlag.scrollWheelZoom,
         ),
+        onMapReady: () {
+          onVisibleBoundsChanged(
+            mapIdentity,
+            mapController.camera.visibleBounds,
+          );
+        },
         onPositionChanged: (camera, _) {
-          onVisibleBoundsChanged(camera.visibleBounds);
+          onVisibleBoundsChanged(mapIdentity, camera.visibleBounds);
         },
       ),
       children: [
@@ -384,54 +445,84 @@ class _QuestionPin extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final urgent = question.urgency != '보통';
-    final color = urgent ? const Color(0xFFFFC84A) : const Color(0xFF10B6A5);
+    final style = _QuestionCategoryStyle.forCategory(question.category);
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(24),
-      onTap: () => context.go('/questions/${question.id}'),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          DecoratedBox(
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x2B0B2B34),
-                  blurRadius: 14,
-                  offset: Offset(0, 7),
-                ),
-              ],
-            ),
+    return Align(
+      alignment: Alignment.bottomCenter,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(20),
+        onTap: () => context.go('/questions/${question.id}'),
+        child: CustomPaint(
+          painter: _QuestionBubblePainter(accentColor: style.color),
+          child: SizedBox(
+            width: 104,
+            height: 56,
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              padding: const EdgeInsets.fromLTRB(12, 7, 12, 18),
               child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.help_outline, size: 18, color: color),
-                  const SizedBox(width: 4),
-                  Text(
-                    formatPoints(question.rewardPoints),
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      fontWeight: FontWeight.w900,
+                  Icon(style.icon, size: 18, color: style.color),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      formatPoints(question.rewardPoints),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: const Color(0xFF17211F),
+                        fontWeight: FontWeight.w900,
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
           ),
-          ClipPath(
-            clipper: _PinTailClipper(),
-            child: ColoredBox(
-              color: color,
-              child: const SizedBox(width: 18, height: 12),
-            ),
-          ),
-        ],
+        ),
       ),
     );
+  }
+}
+
+class _QuestionCategoryStyle {
+  const _QuestionCategoryStyle({required this.icon, required this.color});
+
+  final IconData icon;
+  final Color color;
+
+  static _QuestionCategoryStyle forCategory(String category) {
+    return switch (category) {
+      '교통' => const _QuestionCategoryStyle(
+        icon: Icons.directions_bus_filled_outlined,
+        color: Color(0xFF2563EB),
+      ),
+      '번역' => const _QuestionCategoryStyle(
+        icon: Icons.translate,
+        color: Color(0xFF7C3AED),
+      ),
+      '생활' => const _QuestionCategoryStyle(
+        icon: Icons.home_repair_service_outlined,
+        color: Color(0xFF0F766E),
+      ),
+      '쇼핑' => const _QuestionCategoryStyle(
+        icon: Icons.shopping_bag_outlined,
+        color: Color(0xFFD97706),
+      ),
+      '식당' => const _QuestionCategoryStyle(
+        icon: Icons.restaurant_menu,
+        color: Color(0xFFDC2626),
+      ),
+      '긴급도움' => const _QuestionCategoryStyle(
+        icon: Icons.sos_outlined,
+        color: Color(0xFFE11D48),
+      ),
+      _ => const _QuestionCategoryStyle(
+        icon: Icons.help_outline,
+        color: Color(0xFF10B6A5),
+      ),
+    };
   }
 }
 
@@ -478,13 +569,11 @@ class _QuestionSheet extends StatelessWidget {
     required this.questions,
     required this.profile,
     required this.isLoading,
-    required this.onRefresh,
   });
 
   final List<Question> questions;
   final AppUser? profile;
   final bool isLoading;
-  final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
@@ -522,11 +611,7 @@ class _QuestionSheet extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 14),
-              _SheetHeader(
-                profile: profile,
-                count: questions.length,
-                onRefresh: onRefresh,
-              ),
+              _SheetHeader(profile: profile, count: questions.length),
               const SizedBox(height: 14),
               if (isLoading)
                 const _SheetLoading()
@@ -544,48 +629,32 @@ class _QuestionSheet extends StatelessWidget {
 }
 
 class _SheetHeader extends StatelessWidget {
-  const _SheetHeader({
-    required this.profile,
-    required this.count,
-    required this.onRefresh,
-  });
+  const _SheetHeader({required this.profile, required this.count});
 
   final AppUser? profile;
   final int count;
-  final VoidCallback onRefresh;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '지도에 보이는 질문',
-                style: Theme.of(
-                  context,
-                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                profile == null
-                    ? '현재 화면 · $count개 질문'
-                    : '현재 화면 · 잔액 ${formatPoints(profile!.pointBalance)} · $count개 질문',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: const Color(0xFF60726F),
-                ),
-              ),
-            ],
-          ),
+        Text(
+          '지도에 보이는 질문',
+          style: Theme.of(
+            context,
+          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
         ),
-        IconButton.filledTonal(
-          tooltip: '새로고침',
-          onPressed: onRefresh,
-          icon: const Icon(Icons.refresh),
+        const SizedBox(height: 2),
+        Text(
+          profile == null
+              ? '현재 화면 · $count개 질문'
+              : '현재 화면 · 잔액 ${formatPoints(profile!.pointBalance)} · $count개 질문',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF60726F)),
         ),
       ],
     );
@@ -838,16 +907,61 @@ class _MapActionButton extends StatelessWidget {
   }
 }
 
-class _PinTailClipper extends CustomClipper<Path> {
+class _QuestionBubblePainter extends CustomPainter {
+  const _QuestionBubblePainter({required this.accentColor});
+
+  final Color accentColor;
+
   @override
-  Path getClip(Size size) {
-    return Path()
-      ..moveTo(0, 0)
-      ..lineTo(size.width, 0)
-      ..lineTo(size.width / 2, size.height)
+  void paint(Canvas canvas, Size size) {
+    const tailHeight = 12.0;
+    const tailWidth = 18.0;
+    const radius = 18.0;
+    const inset = 1.5;
+    final bubbleBottom = size.height - tailHeight - inset;
+    final tailCenter = size.width / 2;
+
+    final path = Path()
+      ..moveTo(inset + radius, inset)
+      ..lineTo(size.width - inset - radius, inset)
+      ..quadraticBezierTo(
+        size.width - inset,
+        inset,
+        size.width - inset,
+        inset + radius,
+      )
+      ..lineTo(size.width - inset, bubbleBottom - radius)
+      ..quadraticBezierTo(
+        size.width - inset,
+        bubbleBottom,
+        size.width - inset - radius,
+        bubbleBottom,
+      )
+      ..lineTo(tailCenter + tailWidth / 2, bubbleBottom)
+      ..lineTo(tailCenter, size.height - inset)
+      ..lineTo(tailCenter - tailWidth / 2, bubbleBottom)
+      ..lineTo(inset + radius, bubbleBottom)
+      ..quadraticBezierTo(inset, bubbleBottom, inset, bubbleBottom - radius)
+      ..lineTo(inset, inset + radius)
+      ..quadraticBezierTo(inset, inset, inset + radius, inset)
       ..close();
+
+    canvas.drawShadow(path, const Color(0x330B2B34), 8, true);
+
+    final fill = Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.fill;
+    canvas.drawPath(path, fill);
+
+    final stroke = Paint()
+      ..color = accentColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2;
+    canvas.drawPath(path, stroke);
   }
 
   @override
-  bool shouldReclip(covariant _PinTailClipper oldClipper) => false;
+  bool shouldRepaint(covariant _QuestionBubblePainter oldDelegate) {
+    return oldDelegate.accentColor != accentColor;
+  }
 }

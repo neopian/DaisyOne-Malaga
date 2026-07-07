@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'auth_repository.dart';
 
@@ -12,12 +13,21 @@ class AuthPage extends ConsumerStatefulWidget {
 }
 
 class _AuthPageState extends ConsumerState<AuthPage> {
+  static const _rememberedEmailKey = 'auth.remembered_email';
+
   final _formKey = GlobalKey<FormState>();
   final _email = TextEditingController();
   final _password = TextEditingController();
   final _name = TextEditingController();
   bool _isSignUp = false;
   bool _isLoading = false;
+  bool _rememberMe = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRememberedEmail();
+  }
 
   @override
   void dispose() {
@@ -25,6 +35,16 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     _password.dispose();
     _name.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadRememberedEmail() async {
+    final preferences = await SharedPreferences.getInstance();
+    final rememberedEmail = preferences.getString(_rememberedEmailKey);
+    if (!mounted || rememberedEmail == null || rememberedEmail.isEmpty) return;
+    setState(() {
+      if (_email.text.isEmpty) _email.text = rememberedEmail;
+      _rememberMe = true;
+    });
   }
 
   Future<void> _submit() async {
@@ -49,12 +69,22 @@ class _AuthPageState extends ConsumerState<AuthPage> {
         }
       } else {
         await repo.signIn(email: _email.text.trim(), password: _password.text);
+        await _saveRememberedEmail();
       }
-      if (mounted) router.go('/onboarding');
+      if (mounted) router.go('/home');
     } catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.toString())));
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _saveRememberedEmail() async {
+    final preferences = await SharedPreferences.getInstance();
+    if (_rememberMe) {
+      await preferences.setString(_rememberedEmailKey, _email.text.trim());
+    } else {
+      await preferences.remove(_rememberedEmailKey);
     }
   }
 
@@ -122,6 +152,22 @@ class _AuthPageState extends ConsumerState<AuthPage> {
                           ? '6자 이상 입력해주세요.'
                           : null,
                     ),
+                    if (!_isSignUp) ...[
+                      const SizedBox(height: 10),
+                      CheckboxListTile(
+                        value: _rememberMe,
+                        onChanged: _isLoading
+                            ? null
+                            : (value) {
+                                setState(() => _rememberMe = value ?? false);
+                              },
+                        title: const Text('Remember me'),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        visualDensity: VisualDensity.compact,
+                      ),
+                    ],
                     const SizedBox(height: 20),
                     FilledButton.icon(
                       onPressed: _isLoading ? null : _submit,

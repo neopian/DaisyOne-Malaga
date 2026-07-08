@@ -334,7 +334,7 @@ class _MapTopBar extends StatelessWidget {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
-                              '어디가 궁금하세요?',
+                              '무엇이 궁금하세요?',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.titleMedium

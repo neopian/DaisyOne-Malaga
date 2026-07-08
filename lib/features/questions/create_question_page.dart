@@ -8,7 +8,6 @@ import '../../core/geo/spain_geo.dart';
 import '../../core/services/location_service.dart';
 import '../../core/services/mvp_rules.dart';
 import '../../core/utils/formatters.dart';
-import '../../shared/models/app_user.dart';
 import '../../shared/widgets/app_page.dart';
 import '../../shared/widgets/location_input_section.dart';
 import '../profile/profile_repository.dart';
@@ -22,6 +21,8 @@ class CreateQuestionPage extends ConsumerStatefulWidget {
 }
 
 class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
+  static const _locationUnavailableText = '위치를 가져올 수 없습니다';
+
   final _formKey = GlobalKey<FormState>();
   final _title = TextEditingController();
   final _body = TextEditingController();
@@ -34,8 +35,6 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
   String _category = AppConstants.categories.first;
   bool _isSaving = false;
   bool _isResolvingLocation = false;
-  bool _isEditingLocation = false;
-  bool _didSeedProfileLocation = false;
   String? _locationError;
   double? _latitude;
   double? _longitude;
@@ -43,7 +42,6 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
   @override
   void initState() {
     super.initState();
-    _country.text = 'Spain';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _useCurrentLocation();
     });
@@ -85,24 +83,20 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
         _region.text = location.regionName ?? '';
         _latitude = location.latitude;
         _longitude = location.longitude;
-        _isEditingLocation = false;
       });
     } catch (error) {
       if (!mounted) return;
-      setState(() => _locationError = _locationMessage(error));
+      setState(() {
+        _country.clear();
+        _city.clear();
+        _region.clear();
+        _latitude = null;
+        _longitude = null;
+        _locationError = _locationUnavailableText;
+      });
     } finally {
       if (mounted) setState(() => _isResolvingLocation = false);
     }
-  }
-
-  void _seedProfileLocation(AppUser? profile) {
-    if (_didSeedProfileLocation || profile == null) return;
-    _didSeedProfileLocation = true;
-    if (_city.text.trim().isNotEmpty) {
-      return;
-    }
-    _country.text = 'Spain';
-    _city.text = profile.currentCity ?? '';
   }
 
   bool _hasRequiredLocation() {
@@ -110,32 +104,12 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
         _city.text.trim().isNotEmpty;
   }
 
-  void _finishLocationEdit() {
-    if (!_hasRequiredLocation()) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('스페인 도시를 입력해주세요.')));
-      return;
-    }
-    final place = SpainGeo.placeForCity(_city.text);
-    setState(() {
-      _country.text = 'Spain';
-      _latitude = place.latitude;
-      _longitude = place.longitude;
-      _isEditingLocation = false;
-    });
-  }
-
-  String _locationMessage(Object error) {
-    return error.toString().replaceFirst('Bad state: ', '');
-  }
-
   Future<void> _submit() async {
     if (!_hasRequiredLocation()) {
-      setState(() => _isEditingLocation = true);
+      setState(() => _locationError = _locationUnavailableText);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('스페인 도시를 입력해주세요.')));
+      ).showSnackBar(const SnackBar(content: Text(_locationUnavailableText)));
       return;
     }
     if (!_formKey.currentState!.validate()) return;
@@ -202,7 +176,6 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
   @override
   Widget build(BuildContext context) {
     final profile = ref.watch(currentProfileProvider).asData?.value;
-    _seedProfileLocation(profile);
     return AppPage(
       title: '질문 등록',
       body: SingleChildScrollView(
@@ -217,6 +190,60 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Text('잔액 ${formatPoints(profile.pointBalance)}'),
                 ),
+              LocationInputSection(
+                countryController: _country,
+                cityController: _city,
+                regionController: _region,
+                isEditing: false,
+                isLoading: _isResolvingLocation,
+                errorText: _locationError,
+                lockCountry: true,
+                showActions: false,
+                emptyText: _locationUnavailableText,
+                onEdit: () {},
+                onDone: () {},
+                onUseCurrentLocation: _useCurrentLocation,
+              ),
+              const SizedBox(height: 12),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: DropdownButtonFormField<String>(
+                      value: _category,
+                      decoration: const InputDecoration(labelText: '카테고리'),
+                      items: AppConstants.categories
+                          .map(
+                            (value) => DropdownMenuItem(
+                              value: value,
+                              child: Text(value),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) => setState(() => _category = value!),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextFormField(
+                      controller: _reward,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: '보상 포인트',
+                        prefixIcon: Icon(Icons.toll_outlined),
+                      ),
+                      validator: (value) {
+                        final points = int.tryParse(value ?? '');
+                        if (points == null || points <= 0) {
+                          return '1 이상 입력해주세요.';
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
               TextFormField(
                 controller: _title,
                 decoration: const InputDecoration(
@@ -239,45 +266,6 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
                 validator: (value) => value == null || value.trim().length < 10
                     ? '상황을 조금 더 적어주세요.'
                     : null,
-              ),
-              const SizedBox(height: 12),
-              LocationInputSection(
-                countryController: _country,
-                cityController: _city,
-                regionController: _region,
-                isEditing: _isEditingLocation,
-                isLoading: _isResolvingLocation,
-                errorText: _locationError,
-                lockCountry: true,
-                onEdit: () => setState(() => _isEditingLocation = true),
-                onDone: _finishLocationEdit,
-                onUseCurrentLocation: _useCurrentLocation,
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _category,
-                decoration: const InputDecoration(labelText: '카테고리'),
-                items: AppConstants.categories
-                    .map(
-                      (value) =>
-                          DropdownMenuItem(value: value, child: Text(value)),
-                    )
-                    .toList(),
-                onChanged: (value) => setState(() => _category = value!),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _reward,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: '보상 포인트',
-                  prefixIcon: Icon(Icons.toll_outlined),
-                ),
-                validator: (value) {
-                  final points = int.tryParse(value ?? '');
-                  if (points == null || points <= 0) return '1 이상 입력해주세요.';
-                  return null;
-                },
               ),
               const SizedBox(height: 12),
               OutlinedButton.icon(

@@ -13,6 +13,9 @@ class LocationInputSection extends StatelessWidget {
     required this.onUseCurrentLocation,
     this.errorText,
     this.lockCountry = false,
+    this.showActions = true,
+    this.emptyText = '위치가 설정되지 않았습니다',
+    this.loadingText = '위치 확인 중',
   });
 
   final TextEditingController countryController;
@@ -25,6 +28,9 @@ class LocationInputSection extends StatelessWidget {
   final VoidCallback onUseCurrentLocation;
   final String? errorText;
   final bool lockCountry;
+  final bool showActions;
+  final String emptyText;
+  final String loadingText;
 
   String get _locationLabel {
     final country = countryController.text.trim();
@@ -53,10 +59,11 @@ class _LocationSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final label = section._locationLabel;
+    final hasLocation = label.isNotEmpty;
     final statusText = label.isEmpty
         ? section.isLoading
-              ? '위치 확인 중'
-              : '위치가 설정되지 않았습니다'
+              ? section.loadingText
+              : section.errorText ?? section.emptyText
         : label;
 
     return DecoratedBox(
@@ -69,7 +76,7 @@ class _LocationSummary extends StatelessWidget {
         child: Row(
           children: [
             Icon(
-              label.isEmpty ? Icons.location_searching : Icons.place_outlined,
+              hasLocation ? Icons.place_outlined : Icons.location_searching,
               color: scheme.primary,
             ),
             const SizedBox(width: 12),
@@ -77,15 +84,24 @@ class _LocationSummary extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('현재 위치', style: Theme.of(context).textTheme.labelLarge),
-                  const SizedBox(height: 3),
-                  Text(
-                    statusText,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodyLarge,
+                  Row(
+                    children: [
+                      Text(
+                        '현재 위치',
+                        style: Theme.of(context).textTheme.labelLarge,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          statusText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodyLarge,
+                        ),
+                      ),
+                    ],
                   ),
-                  if (section.errorText != null) ...[
+                  if (section.errorText != null && hasLocation) ...[
                     const SizedBox(height: 4),
                     Text(
                       section.errorText!,
@@ -107,17 +123,18 @@ class _LocationSummary extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
               )
-            else
+            else if (section.showActions)
               IconButton(
                 tooltip: '현재 위치 새로고침',
                 onPressed: section.onUseCurrentLocation,
                 icon: const Icon(Icons.my_location_outlined),
               ),
-            TextButton.icon(
-              onPressed: section.onEdit,
-              icon: const Icon(Icons.edit_location_alt_outlined),
-              label: const Text('변경'),
-            ),
+            if (section.showActions)
+              TextButton.icon(
+                onPressed: section.onEdit,
+                icon: const Icon(Icons.edit_location_alt_outlined),
+                label: const Text('변경'),
+              ),
           ],
         ),
       ),

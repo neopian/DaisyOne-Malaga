@@ -1,5 +1,6 @@
 class AppConstants {
   static const categories = ['교통', '번역', '생활', '쇼핑', '식당', '긴급도움', '기타'];
+  static const defaultUrgency = '보통';
   static const urgencies = ['보통', '빠름', '매우 급함'];
 
   static const sourceTypes = {

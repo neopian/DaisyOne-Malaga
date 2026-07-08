@@ -32,7 +32,6 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
   final _picker = ImagePicker();
   final _images = <XFile>[];
   String _category = AppConstants.categories.first;
-  String _urgency = AppConstants.urgencies.first;
   bool _isSaving = false;
   bool _isResolvingLocation = false;
   bool _isEditingLocation = false;
@@ -169,7 +168,7 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
                 ? null
                 : _region.text.trim(),
             category: _category,
-            urgency: _urgency,
+            urgency: AppConstants.defaultUrgency,
             rewardPoints: rewardPoints,
             latitude: coordinates.latitude,
             longitude: coordinates.longitude,
@@ -265,18 +264,6 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
                     )
                     .toList(),
                 onChanged: (value) => setState(() => _category = value!),
-              ),
-              const SizedBox(height: 12),
-              SegmentedButton<String>(
-                segments: AppConstants.urgencies
-                    .map(
-                      (urgency) =>
-                          ButtonSegment(value: urgency, label: Text(urgency)),
-                    )
-                    .toList(),
-                selected: {_urgency},
-                onSelectionChanged: (value) =>
-                    setState(() => _urgency = value.single),
               ),
               const SizedBox(height: 12),
               TextFormField(

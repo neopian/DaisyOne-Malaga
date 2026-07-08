@@ -7,6 +7,7 @@ import '../../core/utils/formatters.dart';
 import '../../shared/models/answer.dart';
 import '../../shared/models/evidence_link.dart';
 import '../../shared/models/question.dart';
+import '../../shared/models/question_comment.dart';
 import '../../shared/widgets/app_page.dart';
 import '../../shared/widgets/async_value_view.dart';
 import '../../shared/widgets/status_chip.dart';
@@ -125,6 +126,11 @@ class _QuestionDetail extends ConsumerWidget {
           ),
         ],
         const SizedBox(height: 12),
+        _QuestionCommentsSection(
+          question: question,
+          currentUserId: profile?.id,
+        ),
+        const SizedBox(height: 12),
         if (question.isOpen && (helperApplication?.isApproved ?? false))
           _ActionCard(
             icon: Icons.handshake_outlined,
@@ -195,6 +201,215 @@ class _QuestionDetail extends ConsumerWidget {
     } catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.toString())));
     }
+  }
+}
+
+class _QuestionCommentsSection extends StatelessWidget {
+  const _QuestionCommentsSection({
+    required this.question,
+    required this.currentUserId,
+  });
+
+  final Question question;
+  final String? currentUserId;
+
+  @override
+  Widget build(BuildContext context) {
+    final comments = question.comments;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  Icons.mode_comment_outlined,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '코멘트',
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                Text(
+                  '${comments.length}',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.primary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _CommentComposer(questionId: question.id),
+            if (comments.isEmpty) ...[
+              const SizedBox(height: 14),
+              Text(
+                '아직 코멘트가 없습니다.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ] else ...[
+              const Divider(height: 28),
+              for (final comment in comments) ...[
+                _QuestionCommentTile(
+                  comment: comment,
+                  isMine: comment.userId == currentUserId,
+                ),
+                if (comment != comments.last) const Divider(height: 24),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CommentComposer extends ConsumerStatefulWidget {
+  const _CommentComposer({required this.questionId});
+
+  final String questionId;
+
+  @override
+  ConsumerState<_CommentComposer> createState() => _CommentComposerState();
+}
+
+class _CommentComposerState extends ConsumerState<_CommentComposer> {
+  final _controller = TextEditingController();
+  bool _isSubmitting = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: _controller,
+          enabled: !_isSubmitting,
+          minLines: 2,
+          maxLines: 4,
+          maxLength: 600,
+          textInputAction: TextInputAction.newline,
+          decoration: const InputDecoration(
+            hintText: '추가로 공유할 내용을 남겨주세요',
+            prefixIcon: Icon(Icons.chat_bubble_outline),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerRight,
+          child: FilledButton.icon(
+            onPressed: _isSubmitting ? null : _submit,
+            icon: _isSubmitting
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.add_comment_outlined),
+            label: const Text('남기기'),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _submit() async {
+    final body = _controller.text.trim();
+    final messenger = ScaffoldMessenger.of(context);
+
+    if (body.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('코멘트를 입력해 주세요.')));
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+    try {
+      await ref
+          .read(questionRepositoryProvider)
+          .addComment(questionId: widget.questionId, body: body);
+      _controller.clear();
+      ref.invalidate(questionProvider(widget.questionId));
+      messenger.showSnackBar(const SnackBar(content: Text('코멘트를 남겼습니다.')));
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
+  }
+}
+
+class _QuestionCommentTile extends StatelessWidget {
+  const _QuestionCommentTile({required this.comment, required this.isMine});
+
+  final QuestionComment comment;
+  final bool isMine;
+
+  @override
+  Widget build(BuildContext context) {
+    final authorName = isMine
+        ? '나'
+        : (comment.authorName?.isNotEmpty == true
+              ? comment.authorName!
+              : '사용자');
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        CircleAvatar(
+          radius: 18,
+          backgroundImage: comment.authorAvatarUrl?.isNotEmpty == true
+              ? NetworkImage(comment.authorAvatarUrl!)
+              : null,
+          child: comment.authorAvatarUrl?.isNotEmpty == true
+              ? null
+              : const Icon(Icons.person_outline, size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Wrap(
+                spacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    authorName,
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if (comment.createdAt != null)
+                    Text(
+                      formatDate(comment.createdAt),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              Text(comment.body),
+            ],
+          ),
+        ),
+      ],
+    );
   }
 }
 

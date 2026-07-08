@@ -1,4 +1,5 @@
 import 'answer.dart';
+import 'question_comment.dart';
 
 class Question {
   const Question({
@@ -14,6 +15,7 @@ class Question {
     required this.status,
     required this.images,
     required this.answers,
+    required this.comments,
     this.latitude,
     this.longitude,
     this.assignedHelperUserId,
@@ -41,6 +43,7 @@ class Question {
   final double? longitude;
   final List<String> images;
   final List<Answer> answers;
+  final List<QuestionComment> comments;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final DateTime? expiresAt;
@@ -61,6 +64,23 @@ class Question {
   factory Question.fromMap(Map<String, dynamic> map) {
     final imageRows = map['question_images'] as List? ?? const [];
     final answerRows = map['answers'] as List? ?? const [];
+    final commentRows = map['question_comments'] as List? ?? const [];
+    final comments =
+        commentRows
+            .map(
+              (row) => QuestionComment.fromMap(
+                Map<String, dynamic>.from(row as Map),
+              ),
+            )
+            .toList()
+          ..sort((a, b) {
+            final aCreatedAt = a.createdAt;
+            final bCreatedAt = b.createdAt;
+            if (aCreatedAt == null && bCreatedAt == null) return 0;
+            if (aCreatedAt == null) return -1;
+            if (bCreatedAt == null) return 1;
+            return aCreatedAt.compareTo(bCreatedAt);
+          });
 
     return Question(
       id: map['id'] as String,
@@ -85,6 +105,7 @@ class Question {
       answers: answerRows
           .map((row) => Answer.fromMap(Map<String, dynamic>.from(row as Map)))
           .toList(),
+      comments: comments,
       createdAt: DateTime.tryParse(map['created_at'] as String? ?? ''),
       updatedAt: DateTime.tryParse(map['updated_at'] as String? ?? ''),
       expiresAt: DateTime.tryParse(map['expires_at'] as String? ?? ''),

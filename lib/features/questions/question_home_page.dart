@@ -25,8 +25,11 @@ class QuestionHomePage extends ConsumerStatefulWidget {
 
 class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
   late final MapController _mapController;
+  Future<DeviceCoordinates?>? _currentLocationRequest;
+  DeviceCoordinates? _pendingCameraMove;
   DeviceCoordinates? _currentCoordinates;
   LatLngBounds? _visibleBounds;
+  bool _isMapReady = false;
   bool _isResolvingLocation = false;
   String? _locationError;
 
@@ -35,7 +38,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
     super.initState();
     _mapController = MapController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refreshCurrentLocation();
+      _refreshCurrentLocation(moveCamera: true);
     });
   }
 
@@ -45,8 +48,31 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
     super.dispose();
   }
 
-  Future<DeviceCoordinates?> _refreshCurrentLocation() async {
-    if (_isResolvingLocation) return _currentCoordinates;
+  Future<DeviceCoordinates?> _refreshCurrentLocation({
+    bool moveCamera = false,
+  }) {
+    final activeRequest = _currentLocationRequest;
+    if (activeRequest != null) {
+      return activeRequest.then((coordinates) {
+        if (moveCamera && coordinates != null && mounted) {
+          _moveMapToCoordinates(coordinates);
+        }
+        return coordinates;
+      });
+    }
+
+    final request = _resolveCurrentLocation(moveCamera: moveCamera);
+    _currentLocationRequest = request;
+    return request.whenComplete(() {
+      if (identical(_currentLocationRequest, request)) {
+        _currentLocationRequest = null;
+      }
+    });
+  }
+
+  Future<DeviceCoordinates?> _resolveCurrentLocation({
+    required bool moveCamera,
+  }) async {
     setState(() {
       _isResolvingLocation = true;
       _locationError = null;
@@ -60,6 +86,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
         _currentCoordinates = coordinates;
         if (shouldResetBounds) _visibleBounds = null;
       });
+      if (moveCamera) _moveMapToCoordinates(coordinates);
       return coordinates;
     } catch (error) {
       if (!mounted) return null;
@@ -77,13 +104,42 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
   }
 
   Future<void> _moveToCurrentLocation() async {
-    final coordinates = _currentCoordinates ?? await _refreshCurrentLocation();
-    if (!mounted || coordinates == null) return;
-    setState(() => _locationError = null);
-    _mapController.move(
-      LatLng(coordinates.latitude, coordinates.longitude),
-      _currentLocationZoom,
+    final coordinates = await _refreshCurrentLocation(moveCamera: true);
+    if (!mounted || coordinates != null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(_locationError ?? '현재 위치를 확인하지 못했습니다.')),
     );
+  }
+
+  void _moveMapToCoordinates(DeviceCoordinates coordinates) {
+    _pendingCameraMove = coordinates;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _flushPendingCameraMove();
+    });
+  }
+
+  void _flushPendingCameraMove() {
+    if (!_isMapReady) return;
+    final coordinates = _pendingCameraMove;
+    if (coordinates == null) return;
+    _pendingCameraMove = null;
+    try {
+      _mapController.move(
+        LatLng(coordinates.latitude, coordinates.longitude),
+        _currentLocationZoom,
+      );
+    } catch (_) {
+      _pendingCameraMove = coordinates;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _flushPendingCameraMove();
+      });
+    }
+  }
+
+  void _handleMapReady(String mapIdentity, LatLngBounds bounds) {
+    _isMapReady = true;
+    _handleVisibleBoundsChanged(mapIdentity, bounds);
+    _flushPendingCameraMove();
   }
 
   String _locationMessage(Object error) {
@@ -108,6 +164,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
               mapController: _mapController,
               questions: items,
               currentCoordinates: _currentCoordinates,
+              onMapReady: _handleMapReady,
               onVisibleBoundsChanged: _handleVisibleBoundsChanged,
             ),
           ),
@@ -138,11 +195,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
               top: MediaQuery.paddingOf(context).top + 144,
               child: _MapNotice(message: _locationError!),
             ),
-          _QuestionSheet(
-            questions: visibleItems,
-            profile: profile,
-            isLoading: isLoading,
-          ),
+          _QuestionSheet(questions: visibleItems, isLoading: isLoading),
           Positioned(
             right: 18,
             bottom: 264,
@@ -199,6 +252,10 @@ String _mapIdentity(DeviceCoordinates? coordinates) {
   if (coordinates == null) return 'spain-map';
   return 'spain-map-${coordinates.latitude.toStringAsFixed(4)}-${coordinates.longitude.toStringAsFixed(4)}';
 }
+
+const _mapLabelLocale = 'ko';
+const _questionClusterMaxZoom = 8.0;
+const _wholeMapClusterMaxZoom = 6.5;
 
 typedef _VisibleBoundsChanged =
     void Function(String mapIdentity, LatLngBounds bounds);
@@ -332,49 +389,22 @@ class _MapSurface extends StatelessWidget {
     required this.mapController,
     required this.questions,
     required this.currentCoordinates,
+    required this.onMapReady,
     required this.onVisibleBoundsChanged,
   });
 
   final MapController mapController;
   final List<Question> questions;
   final DeviceCoordinates? currentCoordinates;
+  final _VisibleBoundsChanged onMapReady;
   final _VisibleBoundsChanged onVisibleBoundsChanged;
 
   @override
   Widget build(BuildContext context) {
     final currentCoordinates = this.currentCoordinates;
     final mapIdentity = _mapIdentity(currentCoordinates);
-    final markers = questions
-        .where(
-          (question) => question.latitude != null && question.longitude != null,
-        )
-        .map(
-          (question) => Marker(
-            point: LatLng(question.latitude!, question.longitude!),
-            width: 118,
-            height: 72,
-            alignment: Alignment.topCenter,
-            child: _QuestionPin(question: question),
-          ),
-        )
-        .toList();
-    if (currentCoordinates != null) {
-      markers.add(
-        Marker(
-          point: LatLng(
-            currentCoordinates.latitude,
-            currentCoordinates.longitude,
-          ),
-          width: 70,
-          height: 70,
-          alignment: Alignment.center,
-          child: const _CurrentLocationMarker(),
-        ),
-      );
-    }
 
     return FlutterMap(
-      key: ValueKey(mapIdentity),
       mapController: mapController,
       options: MapOptions(
         initialCenter: currentCoordinates == null
@@ -399,10 +429,7 @@ class _MapSurface extends StatelessWidget {
               InteractiveFlag.scrollWheelZoom,
         ),
         onMapReady: () {
-          onVisibleBoundsChanged(
-            mapIdentity,
-            mapController.camera.visibleBounds,
-          );
+          onMapReady(mapIdentity, mapController.camera.visibleBounds);
         },
         onPositionChanged: (camera, _) {
           onVisibleBoundsChanged(mapIdentity, camera.visibleBounds);
@@ -413,7 +440,33 @@ class _MapSurface extends StatelessWidget {
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'local_qa_concierge',
         ),
-        MarkerLayer(markers: markers),
+        Builder(
+          builder: (context) {
+            final camera = MapCamera.of(context);
+            return MarkerLayer(
+              markers: _localizedMapLabelMarkers(
+                zoom: camera.zoom,
+                locale: _mapLabelLocale,
+              ),
+            );
+          },
+        ),
+        Builder(
+          builder: (context) {
+            final camera = MapCamera.of(context);
+            final markers = _questionMarkersForZoom(
+              mapController: mapController,
+              questions: questions,
+              zoom: camera.zoom,
+              visibleBounds: camera.visibleBounds,
+            );
+            if (camera.zoom >= _questionClusterMaxZoom) {
+              final locationMarker = _currentLocationMarker(currentCoordinates);
+              if (locationMarker != null) markers.add(locationMarker);
+            }
+            return MarkerLayer(markers: markers);
+          },
+        ),
         RichAttributionWidget(
           attributions: [
             TextSourceAttribution('OpenStreetMap contributors', onTap: () {}),
@@ -423,6 +476,566 @@ class _MapSurface extends StatelessWidget {
     );
   }
 }
+
+List<Marker> _questionMarkersForZoom({
+  required MapController mapController,
+  required List<Question> questions,
+  required double zoom,
+  required LatLngBounds visibleBounds,
+}) {
+  final visibleQuestions = questions.where((question) {
+    final latitude = question.latitude;
+    final longitude = question.longitude;
+    if (latitude == null || longitude == null) return false;
+    return visibleBounds.contains(LatLng(latitude, longitude));
+  }).toList();
+
+  if (zoom < _questionClusterMaxZoom) {
+    return _clusteredQuestionMarkers(
+      mapController: mapController,
+      questions: visibleQuestions,
+      zoom: zoom,
+    );
+  }
+
+  return visibleQuestions
+      .map(
+        (question) => Marker(
+          point: LatLng(question.latitude!, question.longitude!),
+          width: 118,
+          height: 72,
+          alignment: Alignment.topCenter,
+          child: _QuestionPin(question: question),
+        ),
+      )
+      .toList();
+}
+
+List<Marker> _clusteredQuestionMarkers({
+  required MapController mapController,
+  required List<Question> questions,
+  required double zoom,
+}) {
+  final buckets = <String, _QuestionClusterBucket>{};
+  for (final question in questions) {
+    final latitude = question.latitude;
+    final longitude = question.longitude;
+    if (latitude == null || longitude == null) continue;
+    final key = _questionClusterKey(
+      latitude: latitude,
+      longitude: longitude,
+      zoom: zoom,
+    );
+    (buckets[key] ??= _QuestionClusterBucket()).add(
+      latitude: latitude,
+      longitude: longitude,
+    );
+  }
+
+  return buckets.values.map((bucket) {
+    final center = bucket.center;
+    final markerSize = _clusterMarkerSize(bucket.count);
+    return Marker(
+      point: center,
+      width: markerSize,
+      height: markerSize,
+      alignment: Alignment.center,
+      child: _QuestionClusterMarker(
+        count: bucket.count,
+        onTap: () {
+          final nextZoom = (zoom + 2.4)
+              .clamp(_questionClusterMaxZoom + .4, 12.0)
+              .toDouble();
+          mapController.move(center, nextZoom);
+        },
+      ),
+    );
+  }).toList();
+}
+
+String _questionClusterKey({
+  required double latitude,
+  required double longitude,
+  required double zoom,
+}) {
+  if (zoom < _wholeMapClusterMaxZoom) return 'visible-map';
+
+  final cellSize = zoom < 7.3 ? 3.6 : 1.4;
+  final latitudeCell = (latitude / cellSize).floor();
+  final longitudeCell = (longitude / cellSize).floor();
+  return '$latitudeCell:$longitudeCell';
+}
+
+double _clusterMarkerSize(int count) {
+  if (count >= 100) return 74;
+  if (count >= 10) return 66;
+  return 58;
+}
+
+Marker? _currentLocationMarker(DeviceCoordinates? currentCoordinates) {
+  if (currentCoordinates == null) return null;
+  return Marker(
+    point: LatLng(currentCoordinates.latitude, currentCoordinates.longitude),
+    width: 70,
+    height: 70,
+    alignment: Alignment.center,
+    child: const _CurrentLocationMarker(),
+  );
+}
+
+class _QuestionClusterBucket {
+  int count = 0;
+  double _latitudeSum = 0;
+  double _longitudeSum = 0;
+
+  void add({required double latitude, required double longitude}) {
+    count += 1;
+    _latitudeSum += latitude;
+    _longitudeSum += longitude;
+  }
+
+  LatLng get center {
+    return LatLng(_latitudeSum / count, _longitudeSum / count);
+  }
+}
+
+List<Marker> _localizedMapLabelMarkers({
+  required double zoom,
+  required String locale,
+}) {
+  return _localizedMapPlaces
+      .where((place) => place.tier.isVisibleAt(zoom))
+      .map(
+        (place) => Marker(
+          point: LatLng(place.latitude, place.longitude),
+          width: place.tier.width,
+          height: place.tier.height,
+          alignment: Alignment.center,
+          child: IgnorePointer(
+            child: _LocalizedMapLabel(
+              label: place.labelFor(locale),
+              tier: place.tier,
+            ),
+          ),
+        ),
+      )
+      .toList();
+}
+
+class _LocalizedMapLabel extends StatelessWidget {
+  const _LocalizedMapLabel({required this.label, required this.tier});
+
+  final String label;
+  final _LocalizedMapLabelTier tier;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = tier.foregroundColor;
+    return Center(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: tier.backgroundColor,
+          borderRadius: BorderRadius.circular(6),
+          border: Border.all(color: tier.borderColor),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x22000000),
+              blurRadius: 5,
+              offset: Offset(0, 1),
+            ),
+          ],
+        ),
+        child: Padding(
+          padding: tier.padding,
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              style: TextStyle(
+                color: color,
+                fontSize: tier.fontSize,
+                fontWeight: tier.fontWeight,
+                height: 1.05,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LocalizedMapPlace {
+  const _LocalizedMapPlace({
+    required this.latitude,
+    required this.longitude,
+    required this.tier,
+    required this.labels,
+  });
+
+  final double latitude;
+  final double longitude;
+  final _LocalizedMapLabelTier tier;
+  final Map<String, String> labels;
+
+  String labelFor(String locale) {
+    return labels[locale] ?? labels['native'] ?? labels.values.first;
+  }
+}
+
+enum _LocalizedMapLabelTier { country, region, city, local }
+
+extension _LocalizedMapLabelTierStyle on _LocalizedMapLabelTier {
+  bool isVisibleAt(double zoom) {
+    return zoom >= minZoom && zoom <= maxZoom;
+  }
+
+  double get minZoom {
+    return switch (this) {
+      _LocalizedMapLabelTier.country => 4.8,
+      _LocalizedMapLabelTier.region => 5.3,
+      _LocalizedMapLabelTier.city => 6.7,
+      _LocalizedMapLabelTier.local => 9.2,
+    };
+  }
+
+  double get maxZoom {
+    return switch (this) {
+      _LocalizedMapLabelTier.country => 6.4,
+      _LocalizedMapLabelTier.region => 8.6,
+      _LocalizedMapLabelTier.city => 17.1,
+      _LocalizedMapLabelTier.local => 17.1,
+    };
+  }
+
+  double get width {
+    return switch (this) {
+      _LocalizedMapLabelTier.country => 96,
+      _LocalizedMapLabelTier.region => 128,
+      _LocalizedMapLabelTier.city => 118,
+      _LocalizedMapLabelTier.local => 132,
+    };
+  }
+
+  double get height {
+    return switch (this) {
+      _LocalizedMapLabelTier.country => 34,
+      _LocalizedMapLabelTier.region => 30,
+      _LocalizedMapLabelTier.city => 28,
+      _LocalizedMapLabelTier.local => 26,
+    };
+  }
+
+  double get fontSize {
+    return switch (this) {
+      _LocalizedMapLabelTier.country => 18,
+      _LocalizedMapLabelTier.region => 14,
+      _LocalizedMapLabelTier.city => 13,
+      _LocalizedMapLabelTier.local => 12,
+    };
+  }
+
+  FontWeight get fontWeight {
+    return switch (this) {
+      _LocalizedMapLabelTier.country => FontWeight.w900,
+      _LocalizedMapLabelTier.region => FontWeight.w800,
+      _LocalizedMapLabelTier.city => FontWeight.w800,
+      _LocalizedMapLabelTier.local => FontWeight.w700,
+    };
+  }
+
+  EdgeInsets get padding {
+    return switch (this) {
+      _LocalizedMapLabelTier.country => const EdgeInsets.symmetric(
+        horizontal: 10,
+        vertical: 5,
+      ),
+      _LocalizedMapLabelTier.region => const EdgeInsets.symmetric(
+        horizontal: 8,
+        vertical: 4,
+      ),
+      _LocalizedMapLabelTier.city => const EdgeInsets.symmetric(
+        horizontal: 7,
+        vertical: 4,
+      ),
+      _LocalizedMapLabelTier.local => const EdgeInsets.symmetric(
+        horizontal: 7,
+        vertical: 3,
+      ),
+    };
+  }
+
+  Color get foregroundColor {
+    return switch (this) {
+      _LocalizedMapLabelTier.country => const Color(0xFF0F3D38),
+      _LocalizedMapLabelTier.region => const Color(0xFF34524D),
+      _LocalizedMapLabelTier.city => const Color(0xFF17211F),
+      _LocalizedMapLabelTier.local => const Color(0xFF45524F),
+    };
+  }
+
+  Color get backgroundColor {
+    return switch (this) {
+      _LocalizedMapLabelTier.country => const Color(0xF4E9FBF7),
+      _LocalizedMapLabelTier.region => const Color(0xEFFFFFFF),
+      _LocalizedMapLabelTier.city => const Color(0xEEFFFFFF),
+      _LocalizedMapLabelTier.local => const Color(0xDFFFFFFF),
+    };
+  }
+
+  Color get borderColor {
+    return switch (this) {
+      _LocalizedMapLabelTier.country => const Color(0x6610B6A5),
+      _LocalizedMapLabelTier.region => const Color(0x6692A9A3),
+      _LocalizedMapLabelTier.city => const Color(0x668FA49F),
+      _LocalizedMapLabelTier.local => const Color(0x558FA49F),
+    };
+  }
+}
+
+const _localizedMapPlaces = [
+  _LocalizedMapPlace(
+    latitude: 40.2,
+    longitude: -3.5,
+    tier: _LocalizedMapLabelTier.country,
+    labels: {'ko': '스페인', 'native': 'España'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 37.45,
+    longitude: -4.75,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '안달루시아', 'native': 'Andalucía'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 41.82,
+    longitude: 1.45,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '카탈루냐', 'native': 'Catalunya'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 39.45,
+    longitude: -0.72,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '발렌시아주', 'native': 'Comunitat Valenciana'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 39.58,
+    longitude: -3.0,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '카스티야라만차', 'native': 'Castilla-La Mancha'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 41.75,
+    longitude: -4.78,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '카스티야이레온', 'native': 'Castilla y León'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 42.82,
+    longitude: -7.9,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '갈리시아', 'native': 'Galicia'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 43.08,
+    longitude: -2.62,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '바스크', 'native': 'Euskadi'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 41.35,
+    longitude: -0.66,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '아라곤', 'native': 'Aragón'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 37.95,
+    longitude: -1.55,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '무르시아', 'native': 'Región de Murcia'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 39.05,
+    longitude: -6.25,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '엑스트레마두라', 'native': 'Extremadura'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 43.35,
+    longitude: -5.9,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '아스투리아스', 'native': 'Asturias'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 39.6,
+    longitude: 2.92,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '발레아레스 제도', 'native': 'Illes Balears'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 28.35,
+    longitude: -15.9,
+    tier: _LocalizedMapLabelTier.region,
+    labels: {'ko': '카나리아 제도', 'native': 'Canarias'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 40.4168,
+    longitude: -3.7038,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '마드리드', 'native': 'Madrid'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 41.3874,
+    longitude: 2.1686,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '바르셀로나', 'native': 'Barcelona'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 39.4699,
+    longitude: -0.3763,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '발렌시아', 'native': 'Valencia'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 37.3891,
+    longitude: -5.9845,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '세비야', 'native': 'Sevilla'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 41.6488,
+    longitude: -0.8891,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '사라고사', 'native': 'Zaragoza'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.7213,
+    longitude: -4.4214,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '말라가', 'native': 'Málaga'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 37.9922,
+    longitude: -1.1307,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '무르시아', 'native': 'Murcia'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 39.5696,
+    longitude: 2.6502,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '팔마', 'native': 'Palma'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 43.263,
+    longitude: -2.935,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '빌바오', 'native': 'Bilbao'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 38.3452,
+    longitude: -0.481,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '알리칸테', 'native': 'Alicante'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 37.8882,
+    longitude: -4.7794,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '코르도바', 'native': 'Córdoba'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 37.1773,
+    longitude: -3.5986,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '그라나다', 'native': 'Granada'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.5297,
+    longitude: -6.2926,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '카디스', 'native': 'Cádiz'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.834,
+    longitude: -2.4637,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '알메리아', 'native': 'Almería'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 37.7796,
+    longitude: -3.7849,
+    tier: _LocalizedMapLabelTier.city,
+    labels: {'ko': '하엔', 'native': 'Jaén'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.5101,
+    longitude: -4.8824,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '마르베야', 'native': 'Marbella'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.5988,
+    longitude: -4.5168,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '토레몰리노스', 'native': 'Torremolinos'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.5966,
+    longitude: -4.5727,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '베날마데나', 'native': 'Benalmádena'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.539,
+    longitude: -4.6244,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '푸엔히롤라', 'native': 'Fuengirola'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.596,
+    longitude: -4.6373,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '미하스', 'native': 'Mijas'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.7465,
+    longitude: -3.8794,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '네르하', 'native': 'Nerja'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.7726,
+    longitude: -4.1005,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '벨레스말라가', 'native': 'Vélez-Málaga'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.7169,
+    longitude: -4.2806,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '린콘 데 라 빅토리아', 'native': 'Rincón de la Victoria'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.4256,
+    longitude: -5.151,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '에스테포나', 'native': 'Estepona'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 37.0194,
+    longitude: -4.5612,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '안테케라', 'native': 'Antequera'},
+  ),
+  _LocalizedMapPlace(
+    latitude: 36.7462,
+    longitude: -5.1612,
+    tier: _LocalizedMapLabelTier.local,
+    labels: {'ko': '론다', 'native': 'Ronda'},
+  ),
+];
 
 class _NoCoordinateBanner extends StatelessWidget {
   const _NoCoordinateBanner();
@@ -434,6 +1047,68 @@ class _NoCoordinateBanner extends StatelessWidget {
       right: 16,
       top: MediaQuery.paddingOf(context).top + 86,
       child: const _MapNotice(message: '이전 질문에는 좌표가 없어 지도 핀이 표시되지 않을 수 있습니다.'),
+    );
+  }
+}
+
+class _QuestionClusterMarker extends StatelessWidget {
+  const _QuestionClusterMarker({required this.count, required this.onTap});
+
+  final int count;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final displayCount = count > 99 ? '99+' : '$count';
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        customBorder: const CircleBorder(),
+        onTap: onTap,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF0F766E),
+            border: Border.all(color: Colors.white, width: 4),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x330B2B34),
+                blurRadius: 14,
+                offset: Offset(0, 5),
+              ),
+            ],
+          ),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  displayCount,
+                  maxLines: 1,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    height: 1,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                const Text(
+                  '질문',
+                  maxLines: 1,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    height: 1,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
@@ -564,74 +1239,127 @@ class _CurrentLocationMarker extends StatelessWidget {
   }
 }
 
-class _QuestionSheet extends StatelessWidget {
-  const _QuestionSheet({
-    required this.questions,
-    required this.profile,
-    required this.isLoading,
-  });
+const _questionSheetInitialSize = .28;
+const _questionSheetMinSize = .20;
+const _questionSheetMaxSize = .68;
+
+class _QuestionSheet extends StatefulWidget {
+  const _QuestionSheet({required this.questions, required this.isLoading});
 
   final List<Question> questions;
-  final AppUser? profile;
   final bool isLoading;
 
   @override
+  State<_QuestionSheet> createState() => _QuestionSheetState();
+}
+
+class _QuestionSheetState extends State<_QuestionSheet> {
+  final DraggableScrollableController _sheetController =
+      DraggableScrollableController();
+
+  @override
+  void dispose() {
+    _sheetController.dispose();
+    super.dispose();
+  }
+
+  void _handleDragUpdate(DragUpdateDetails details, double availableHeight) {
+    if (!_sheetController.isAttached || availableHeight <= 0) return;
+
+    final dragDelta = details.primaryDelta ?? 0;
+    final nextSize = (_sheetController.size - dragDelta / availableHeight)
+        .clamp(_questionSheetMinSize, _questionSheetMaxSize)
+        .toDouble();
+    _sheetController.jumpTo(nextSize);
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: .28,
-      minChildSize: .20,
-      maxChildSize: .68,
-      snap: true,
-      snapSizes: const [.28, .68],
-      builder: (context, controller) {
-        return DecoratedBox(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
-            boxShadow: [
-              BoxShadow(
-                color: Color(0x300B2B34),
-                blurRadius: 26,
-                offset: Offset(0, -8),
-              ),
-            ],
-          ),
-          child: ListView(
-            controller: controller,
-            padding: const EdgeInsets.fromLTRB(18, 10, 18, 28),
-            children: [
-              Center(
-                child: Container(
-                  width: 42,
-                  height: 5,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFD8E2DF),
-                    borderRadius: BorderRadius.circular(8),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return DraggableScrollableSheet(
+          controller: _sheetController,
+          initialChildSize: _questionSheetInitialSize,
+          minChildSize: _questionSheetMinSize,
+          maxChildSize: _questionSheetMaxSize,
+          builder: (context, controller) {
+            return DecoratedBox(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Color(0x300B2B34),
+                    blurRadius: 26,
+                    offset: Offset(0, -8),
                   ),
-                ),
+                ],
               ),
-              const SizedBox(height: 14),
-              _SheetHeader(profile: profile, count: questions.length),
-              const SizedBox(height: 14),
-              if (isLoading)
-                const _SheetLoading()
-              else if (questions.isEmpty)
-                const _EmptyMapState()
-              else
-                for (final question in questions)
-                  _NearbyQuestionTile(question: question),
-            ],
-          ),
+              child: ListView(
+                controller: controller,
+                padding: const EdgeInsets.fromLTRB(18, 6, 18, 28),
+                children: [
+                  _QuestionSheetDragHandle(
+                    onDragUpdate: (details) {
+                      _handleDragUpdate(details, constraints.maxHeight);
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  _SheetHeader(count: widget.questions.length),
+                  const SizedBox(height: 14),
+                  if (widget.isLoading)
+                    const _SheetLoading()
+                  else if (widget.questions.isEmpty)
+                    const _EmptyMapState()
+                  else
+                    for (final question in widget.questions)
+                      _NearbyQuestionTile(question: question),
+                ],
+              ),
+            );
+          },
         );
       },
     );
   }
 }
 
-class _SheetHeader extends StatelessWidget {
-  const _SheetHeader({required this.profile, required this.count});
+class _QuestionSheetDragHandle extends StatelessWidget {
+  const _QuestionSheetDragHandle({required this.onDragUpdate});
 
-  final AppUser? profile;
+  final GestureDragUpdateCallback onDragUpdate;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '질문 목록 크기 조절',
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeUpDown,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onVerticalDragUpdate: onDragUpdate,
+          child: SizedBox(
+            height: 30,
+            child: Center(
+              child: Container(
+                width: 70,
+                height: 6,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFD8E2DF),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SheetHeader extends StatelessWidget {
+  const _SheetHeader({required this.count});
+
   final int count;
 
   @override
@@ -647,9 +1375,7 @@ class _SheetHeader extends StatelessWidget {
         ),
         const SizedBox(height: 2),
         Text(
-          profile == null
-              ? '현재 화면 · $count개 질문'
-              : '현재 화면 · 잔액 ${formatPoints(profile!.pointBalance)} · $count개 질문',
+          '현재 화면 · $count개 질문',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: Theme.of(

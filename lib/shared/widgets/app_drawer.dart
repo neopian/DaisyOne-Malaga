@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/utils/formatters.dart';
 import '../../features/auth/auth_repository.dart';
 import '../../features/profile/profile_repository.dart';
 
@@ -31,6 +32,27 @@ class AppDrawer extends ConsumerWidget {
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               Text(profile?.email ?? ''),
+              if (profile != null) ...[
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.account_balance_wallet_outlined,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      '잔액 ${formatPoints(profile.pointBalance)}',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),

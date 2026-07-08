@@ -38,6 +38,10 @@ class QuestionRepository {
   static const _questionSelect = '''
     *,
     question_images(image_url),
+    question_comments!question_comments_question_id_fkey(
+      *,
+      commenter:users!question_comments_user_id_fkey(name, avatar_url)
+    ),
     answers!answers_question_id_fkey(
       *,
       answer_evidence_links(*)
@@ -72,14 +76,21 @@ class QuestionRepository {
   }
 
   Future<Question> fetchQuestion(String questionId) async {
-    final row = await _withTimeout(
-      _client
-          .from('questions')
-          .select(_questionSelect)
-          .eq('id', questionId)
-          .single(),
-    );
-    return Question.fromMap(Map<String, dynamic>.from(row));
+    try {
+      final row = await _withTimeout(
+        _client
+            .from('questions')
+            .select(_questionSelect)
+            .eq('id', questionId)
+            .single(),
+      );
+      return Question.fromMap(Map<String, dynamic>.from(row));
+    } on PostgrestException catch (error) {
+      if (_isQuestionCommentsMigrationError(error)) {
+        throw const QuestionCommentsMigrationRequiredException();
+      }
+      rethrow;
+    }
   }
 
   Future<String> createQuestion({
@@ -150,6 +161,31 @@ class QuestionRepository {
     await _client.rpc('accept_question', params: {'p_question_id': questionId});
   }
 
+  Future<void> addComment({
+    required String questionId,
+    required String body,
+  }) async {
+    final user = _client.auth.currentUser;
+    if (user == null) {
+      throw StateError('로그인이 필요합니다.');
+    }
+
+    try {
+      await _withTimeout(
+        _client.from('question_comments').insert({
+          'question_id': questionId,
+          'user_id': user.id,
+          'body': body.trim(),
+        }),
+      );
+    } on PostgrestException catch (error) {
+      if (_isQuestionCommentsMigrationError(error)) {
+        throw const QuestionCommentsMigrationRequiredException();
+      }
+      rethrow;
+    }
+  }
+
   Future<T> _withTimeout<T>(Future<T> request) {
     return request.timeout(
       _requestTimeout,
@@ -159,6 +195,13 @@ class QuestionRepository {
       ),
     );
   }
+
+  bool _isQuestionCommentsMigrationError(PostgrestException error) {
+    final details = '${error.message} ${error.details ?? ''}';
+    return error.code == 'PGRST200' ||
+        error.code == '42P01' ||
+        details.contains('question_comments');
+  }
 }
 
 class SpainMapMigrationRequiredException implements Exception {
@@ -167,5 +210,14 @@ class SpainMapMigrationRequiredException implements Exception {
   @override
   String toString() {
     return 'Supabase SQL Editor에서 202607070001_spain_map_coordinates.sql을 실행한 뒤 다시 시도해주세요.';
+  }
+}
+
+class QuestionCommentsMigrationRequiredException implements Exception {
+  const QuestionCommentsMigrationRequiredException();
+
+  @override
+  String toString() {
+    return 'Supabase SQL Editor에서 202607070002_question_comments.sql을 실행한 뒤 다시 시도해주세요.';
   }
 }

@@ -29,7 +29,10 @@ class QuestionDetailPage extends ConsumerWidget {
       actions: [
         IconButton(
           tooltip: '새로고침',
-          onPressed: () => ref.invalidate(questionProvider(questionId)),
+          onPressed: () {
+            ref.invalidate(questionProvider(questionId));
+            ref.invalidate(helperApplicationProvider);
+          },
           icon: const Icon(Icons.refresh),
         ),
       ],
@@ -55,6 +58,8 @@ class _QuestionDetail extends ConsumerWidget {
         ?.value;
     final isOwner = profile?.id == question.userId;
     final isAssignedHelper = profile?.id == question.assignedHelperUserId;
+    final canAcceptQuestion =
+        question.isOpen && !isOwner && (helperApplication?.isApproved ?? false);
     final answer = question.submittedAnswer;
 
     return ListView(
@@ -131,19 +136,17 @@ class _QuestionDetail extends ConsumerWidget {
           currentUserId: profile?.id,
         ),
         const SizedBox(height: 12),
-        if (question.isOpen && (helperApplication?.isApproved ?? false))
+        if (canAcceptQuestion)
           _ActionCard(
             icon: Icons.handshake_outlined,
             title: '질문 수락',
             buttonLabel: '1:1로 수락',
             onPressed: () => _acceptQuestion(context, ref, question.id),
           ),
-        if (question.isOpen &&
-            !(helperApplication?.isApproved ?? false) &&
-            !isOwner)
+        if (question.isOpen && isOwner)
           const _InfoCard(
-            icon: Icons.verified_user_outlined,
-            title: '승인된 답변자만 수락할 수 있습니다',
+            icon: Icons.info_outline,
+            title: '내가 작성한 질문은 답변자로 수락할 수 없습니다',
           ),
         if (isAssignedHelper && question.isAssigned)
           _ActionCard(
@@ -516,17 +519,29 @@ class _ActionCard extends StatelessWidget {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Icon(icon, color: Theme.of(context).colorScheme.primary),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                title,
-                style: Theme.of(context).textTheme.titleMedium,
+            Row(
+              children: [
+                Icon(icon, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed: onPressed,
+                child: Text(buttonLabel),
               ),
             ),
-            FilledButton(onPressed: onPressed, child: Text(buttonLabel)),
           ],
         ),
       ),

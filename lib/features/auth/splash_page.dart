@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import 'auth_repository.dart';
+import 'session_scope.dart';
 
 class SplashPage extends ConsumerStatefulWidget {
   const SplashPage({super.key});
@@ -24,6 +25,7 @@ class _SplashPageState extends ConsumerState<SplashPage> {
     final user = repo.currentUser;
     if (!mounted) return;
     if (user == null) {
+      invalidateSessionScopedProviders(ref);
       context.go('/auth');
       return;
     }

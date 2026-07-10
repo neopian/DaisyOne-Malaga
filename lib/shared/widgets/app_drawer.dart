@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/utils/formatters.dart';
 import '../../features/auth/auth_repository.dart';
+import '../../features/auth/session_scope.dart';
 import '../../features/profile/profile_repository.dart';
 
 class AppDrawer extends ConsumerWidget {
@@ -83,6 +84,7 @@ class AppDrawer extends ConsumerWidget {
           title: const Text('로그아웃'),
           onTap: () async {
             await ref.read(authRepositoryProvider).signOut();
+            invalidateSessionScopedProviders(ref);
             if (context.mounted) {
               router.go('/auth');
             }

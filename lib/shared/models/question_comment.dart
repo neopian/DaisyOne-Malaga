@@ -25,9 +25,9 @@ class QuestionComment {
         : null;
 
     return QuestionComment(
-      id: map['id'] as String,
-      questionId: map['question_id'] as String,
-      userId: map['user_id'] as String,
+      id: map['id'] as String? ?? '',
+      questionId: map['question_id'] as String? ?? '',
+      userId: map['user_id'] as String? ?? '',
       body: map['body'] as String? ?? '',
       authorName: author?['name'] as String?,
       authorAvatarUrl: author?['avatar_url'] as String?,

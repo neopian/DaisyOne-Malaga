@@ -30,14 +30,17 @@ class Answer {
   factory Answer.fromMap(Map<String, dynamic> map) {
     final links = (map['answer_evidence_links'] as List? ?? const [])
         .map(
-          (row) => EvidenceLink.fromMap(Map<String, dynamic>.from(row as Map)),
+          (row) => row is Map
+              ? EvidenceLink.fromMap(Map<String, dynamic>.from(row))
+              : null,
         )
+        .whereType<EvidenceLink>()
         .toList();
 
     return Answer(
-      id: map['id'] as String,
-      questionId: map['question_id'] as String,
-      helperUserId: map['helper_user_id'] as String,
+      id: map['id'] as String? ?? '',
+      questionId: map['question_id'] as String? ?? '',
+      helperUserId: map['helper_user_id'] as String? ?? '',
       body: map['body'] as String? ?? '',
       evidenceSummary: map['evidence_summary'] as String? ?? '',
       verificationMethod: map['verification_method'] as String? ?? '',

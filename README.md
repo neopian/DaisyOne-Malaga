@@ -27,12 +27,31 @@ set is_admin = true
 where email = 'admin@example.com';
 ```
 
+### 개발용 로그인 shortcut 계정
+
+로그인 화면의 개발용 shortcut 버튼을 바로 쓰려면 Supabase SQL Editor에서 아래 파일을 실행합니다.
+기존 개발용 계정이 꼬였을 때도 같은 파일을 다시 실행하면 5개 계정만 정리 후 재생성합니다.
+실행 후 마지막 결과 표의 세 boolean 컬럼이 모두 `true`인지 확인합니다.
+
+실행 전 SQL Editor 같은 세션에서 개발용 비밀번호를 설정합니다.
+
+```sql
+select set_config('app.dev_login_password', '<LOCAL_DEV_PASSWORD>', false);
+```
+
+```text
+supabase/migrations/202607080001_dev_login_shortcuts.sql
+```
+
+앱 실행 시에도 같은 값을 `DEV_LOGIN_PASSWORD`로 넘기면 shortcut 버튼이 표시됩니다.
+
 ## 실행
 
 ```bash
 flutter run \
   --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co \
-  --dart-define=SUPABASE_ANON_KEY=YOUR_ANON_KEY
+  --dart-define=SUPABASE_ANON_KEY=YOUR_ANON_KEY \
+  --dart-define=DEV_LOGIN_PASSWORD=<LOCAL_DEV_PASSWORD>
 ```
 
 ## 검증

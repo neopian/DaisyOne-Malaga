@@ -1,9 +1,49 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'auth_repository.dart';
+import 'session_scope.dart';
+
+const _devLoginPassword = String.fromEnvironment('DEV_LOGIN_PASSWORD');
+final _showLoginShortcuts =
+    (kDebugMode || bool.fromEnvironment('ENABLE_LOGIN_SHORTCUTS')) &&
+    _devLoginPassword.isNotEmpty;
+
+const _devLoginAccounts = [
+  _DevLoginAccount(
+    label: '질문자1',
+    email: 'questioner1@example.com',
+    name: '질문자1',
+    icon: Icons.person_outline,
+  ),
+  _DevLoginAccount(
+    label: '질문자2',
+    email: 'questioner2@example.com',
+    name: '질문자2',
+    icon: Icons.person_outline,
+  ),
+  _DevLoginAccount(
+    label: '질문자3',
+    email: 'questioner3@example.com',
+    name: '질문자3',
+    icon: Icons.person_outline,
+  ),
+  _DevLoginAccount(
+    label: '답변자1',
+    email: 'answerer1@example.com',
+    name: '답변자1',
+    icon: Icons.support_agent,
+  ),
+  _DevLoginAccount(
+    label: '답변자2',
+    email: 'answerer2@example.com',
+    name: '답변자2',
+    icon: Icons.support_agent,
+  ),
+];
 
 class AuthPage extends ConsumerStatefulWidget {
   const AuthPage({super.key});
@@ -71,12 +111,48 @@ class _AuthPageState extends ConsumerState<AuthPage> {
         await repo.signIn(email: _email.text.trim(), password: _password.text);
         await _saveRememberedEmail();
       }
+      invalidateSessionScopedProviders(ref);
       if (mounted) router.go('/home');
     } catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text(error.toString())));
+      messenger.showSnackBar(SnackBar(content: Text(_authErrorText(error))));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _signInWithShortcut(_DevLoginAccount account) async {
+    if (_isLoading) return;
+    setState(() {
+      _isLoading = true;
+      _isSignUp = false;
+      _email.text = account.email;
+      _password.text = _devLoginPassword;
+    });
+
+    final messenger = ScaffoldMessenger.of(context);
+    final router = GoRouter.of(context);
+    try {
+      await ref
+          .read(authRepositoryProvider)
+          .signIn(email: account.email, password: _devLoginPassword);
+      await _saveRememberedEmail();
+      invalidateSessionScopedProviders(ref);
+      if (mounted) router.go('/home');
+    } catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text(_authErrorText(error))));
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  String _authErrorText(Object error) {
+    final message = error.toString();
+    if (message.contains('Invalid login credentials') ||
+        message.contains('Database error querying schema') ||
+        message.contains('unexpected_failure')) {
+      return '개발용 로그인 seed SQL을 다시 실행해 주세요. 원문: $message';
+    }
+    return message;
   }
 
   Future<void> _saveRememberedEmail() async {
@@ -186,6 +262,28 @@ class _AuthPageState extends ConsumerState<AuthPage> {
                           : () => setState(() => _isSignUp = !_isSignUp),
                       child: Text(_isSignUp ? '이미 계정이 있어요' : '새 계정 만들기'),
                     ),
+                    if (!_isSignUp && _showLoginShortcuts) ...[
+                      const SizedBox(height: 8),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (final account in _devLoginAccounts)
+                            OutlinedButton.icon(
+                              onPressed: _isLoading
+                                  ? null
+                                  : () => _signInWithShortcut(account),
+                              icon: Icon(account.icon, size: 18),
+                              label: Text(account.label),
+                              style: OutlinedButton.styleFrom(
+                                minimumSize: const Size(112, 42),
+                                visualDensity: VisualDensity.compact,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -195,4 +293,18 @@ class _AuthPageState extends ConsumerState<AuthPage> {
       ),
     );
   }
+}
+
+class _DevLoginAccount {
+  const _DevLoginAccount({
+    required this.label,
+    required this.email,
+    required this.name,
+    required this.icon,
+  });
+
+  final String label;
+  final String email;
+  final String name;
+  final IconData icon;
 }

@@ -195,7 +195,12 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
               top: MediaQuery.paddingOf(context).top + 144,
               child: _MapNotice(message: _locationError!),
             ),
-          _QuestionSheet(questions: visibleItems, isLoading: isLoading),
+          Positioned.fill(
+            child: _QuestionSheet(
+              questions: visibleItems,
+              isLoading: isLoading,
+            ),
+          ),
           Positioned(
             right: 18,
             bottom: 264,

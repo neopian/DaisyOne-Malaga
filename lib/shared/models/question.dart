@@ -68,10 +68,11 @@ class Question {
     final comments =
         commentRows
             .map(
-              (row) => QuestionComment.fromMap(
-                Map<String, dynamic>.from(row as Map),
-              ),
+              (row) => row is Map
+                  ? QuestionComment.fromMap(Map<String, dynamic>.from(row))
+                  : null,
             )
+            .whereType<QuestionComment>()
             .toList()
           ..sort((a, b) {
             final aCreatedAt = a.createdAt;
@@ -83,8 +84,8 @@ class Question {
           });
 
     return Question(
-      id: map['id'] as String,
-      userId: map['user_id'] as String,
+      id: map['id'] as String? ?? '',
+      userId: map['user_id'] as String? ?? '',
       assignedHelperUserId: map['assigned_helper_user_id'] as String?,
       country: map['country'] as String? ?? '',
       city: map['city'] as String? ?? '',
@@ -93,17 +94,22 @@ class Question {
       urgency: map['urgency'] as String? ?? '보통',
       title: map['title'] as String? ?? '',
       body: map['body'] as String? ?? '',
-      rewardPoints: map['reward_points'] as int? ?? 0,
+      rewardPoints: (map['reward_points'] as num?)?.toInt() ?? 0,
       status: map['status'] as String? ?? 'open',
       acceptedAnswerId: map['accepted_answer_id'] as String?,
       latitude: (map['latitude'] as num?)?.toDouble(),
       longitude: (map['longitude'] as num?)?.toDouble(),
       images: imageRows
-          .map((row) => (row as Map)['image_url'] as String? ?? '')
+          .map((row) => row is Map ? row['image_url'] as String? ?? '' : '')
           .where((url) => url.isNotEmpty)
           .toList(),
       answers: answerRows
-          .map((row) => Answer.fromMap(Map<String, dynamic>.from(row as Map)))
+          .map(
+            (row) => row is Map
+                ? Answer.fromMap(Map<String, dynamic>.from(row))
+                : null,
+          )
+          .whereType<Answer>()
           .toList(),
       comments: comments,
       createdAt: DateTime.tryParse(map['created_at'] as String? ?? ''),

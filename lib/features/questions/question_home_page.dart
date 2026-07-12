@@ -122,9 +122,12 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
     if (coordinates == null) return;
     _pendingCameraMove = null;
     try {
+      final viewportHeight = MediaQuery.sizeOf(context).height;
+      final coveredHeight = viewportHeight * _questionSheetSize;
       _mapController.move(
         LatLng(coordinates.latitude, coordinates.longitude),
         _currentLocationZoom,
+        offset: Offset(0, -coveredHeight / 2),
       );
     } catch (_) {
       _pendingCameraMove = coordinates;

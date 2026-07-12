@@ -23,22 +23,22 @@ class StatusChip extends StatelessWidget {
         : scheme.onSurfaceVariant;
 
     if (compact) {
-      return DecoratedBox(
+      return Container(
+        height: 28,
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        alignment: Alignment.center,
         decoration: BoxDecoration(
           color: backgroundColor,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(999),
         ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Text(
-            label,
-            maxLines: 1,
-            softWrap: false,
-            style: TextStyle(
-              color: foregroundColor,
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-            ),
+        child: Text(
+          label,
+          maxLines: 1,
+          softWrap: false,
+          style: TextStyle(
+            color: foregroundColor,
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
           ),
         ),
       );

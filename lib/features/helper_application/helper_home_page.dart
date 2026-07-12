@@ -6,6 +6,7 @@ import '../../shared/widgets/app_page.dart';
 import '../../shared/widgets/async_value_view.dart';
 import '../../shared/widgets/empty_state.dart';
 import '../questions/question_home_page.dart';
+import '../questions/question_realtime.dart';
 import '../questions/question_repository.dart';
 import 'helper_repository.dart';
 
@@ -14,6 +15,7 @@ class HelperHomePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(questionRealtimeProvider);
     final application = ref.watch(helperApplicationProvider);
     return AppPage(
       title: '답변자 홈',

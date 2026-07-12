@@ -19,7 +19,8 @@ Flutter, Riverpod, GoRouter, Supabase로 만든 모바일 우선 MVP입니다.
 1. Supabase 프로젝트를 생성합니다.
 2. `supabase/migrations/202607040001_initial_mvp.sql`을 SQL Editor에서 실행합니다.
 3. 실제 스페인 지도 좌표를 쓰려면 `supabase/migrations/202607070001_spain_map_coordinates.sql`도 이어서 실행합니다.
-4. 첫 관리자 계정으로 로그인한 뒤 SQL Editor에서 해당 사용자를 관리자로 지정합니다.
+4. 질문과 답변을 자동 갱신하려면 `supabase/migrations/202607120001_enable_question_realtime.sql`을 실행합니다.
+5. 첫 관리자 계정으로 로그인한 뒤 SQL Editor에서 해당 사용자를 관리자로 지정합니다.
 
 ```sql
 update public.users

@@ -10,7 +10,7 @@ import '../../core/utils/formatters.dart';
 import '../../shared/models/question.dart';
 import '../../shared/widgets/app_drawer.dart';
 import '../../shared/widgets/status_chip.dart';
-import '../profile/profile_repository.dart';
+import 'question_realtime.dart';
 import 'question_repository.dart';
 
 const _currentLocationZoom = 13.0;
@@ -96,12 +96,6 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
     }
   }
 
-  void _refreshData() {
-    ref.invalidate(questionsProvider);
-    ref.invalidate(currentProfileProvider);
-    _refreshCurrentLocation();
-  }
-
   Future<void> _moveToCurrentLocation() async {
     final coordinates = await _refreshCurrentLocation(moveCamera: true);
     if (!mounted || coordinates != null) return;
@@ -147,6 +141,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    ref.watch(questionRealtimeProvider);
     final questions = ref.watch(questionsProvider);
     final items = questions.asData?.value ?? const <Question>[];
     final visibleItems = _visibleQuestions(items);
@@ -166,11 +161,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
               onVisibleBoundsChanged: _handleVisibleBoundsChanged,
             ),
           ),
-          _MapTopBar(
-            isLoading: isLoading || _isResolvingLocation,
-            onRefresh: _refreshData,
-            onSwitchRole: () => context.go('/helper/home'),
-          ),
+          _MapTopBar(onSwitchRole: () => context.go('/helper/home')),
           if (questions.hasError)
             Positioned(
               left: 16,
@@ -273,14 +264,8 @@ class QuestionCard extends StatelessWidget {
 }
 
 class _MapTopBar extends StatelessWidget {
-  const _MapTopBar({
-    required this.isLoading,
-    required this.onRefresh,
-    required this.onSwitchRole,
-  });
+  const _MapTopBar({required this.onSwitchRole});
 
-  final bool isLoading;
-  final VoidCallback onRefresh;
   final VoidCallback onSwitchRole;
 
   @override
@@ -340,12 +325,6 @@ class _MapTopBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 10),
-          _CircleMapButton(
-            tooltip: '새로고침',
-            icon: isLoading ? Icons.sync : Icons.refresh,
-            onTap: onRefresh,
-          ),
-          const SizedBox(width: 8),
           _CircleMapButton(
             tooltip: '답변자로 전환',
             icon: Icons.support_agent_outlined,

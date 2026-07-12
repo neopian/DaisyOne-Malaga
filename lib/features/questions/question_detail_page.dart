@@ -14,6 +14,7 @@ import '../../shared/widgets/status_chip.dart';
 import '../answers/answer_repository.dart';
 import '../helper_application/helper_repository.dart';
 import '../profile/profile_repository.dart';
+import 'question_realtime.dart';
 import 'question_repository.dart';
 
 class QuestionDetailPage extends ConsumerWidget {
@@ -23,6 +24,7 @@ class QuestionDetailPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(questionRealtimeProvider);
     final question = ref.watch(questionProvider(questionId));
     return AppPage(
       title: '질문 상세',

@@ -24,18 +24,22 @@ class QuestionHomePage extends ConsumerStatefulWidget {
 
 class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
   late final MapController _mapController;
+  late final TextEditingController _searchController;
   Future<DeviceCoordinates?>? _currentLocationRequest;
   DeviceCoordinates? _pendingCameraMove;
   DeviceCoordinates? _currentCoordinates;
   LatLngBounds? _visibleBounds;
   bool _isMapReady = false;
   bool _isResolvingLocation = false;
+  double _questionSheetSize = _questionSheetInitialSize;
+  String _searchQuery = '';
   String? _locationError;
 
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
+    _searchController = TextEditingController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshCurrentLocation(moveCamera: true);
     });
@@ -43,6 +47,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
 
   @override
   void dispose() {
+    _searchController.dispose();
     _mapController.dispose();
     super.dispose();
   }
@@ -144,7 +149,8 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
     ref.watch(questionRealtimeProvider);
     final questions = ref.watch(questionsProvider);
     final items = questions.asData?.value ?? const <Question>[];
-    final visibleItems = _visibleQuestions(items);
+    final matchingItems = _searchQuestions(items, _searchQuery);
+    final visibleItems = _visibleQuestions(matchingItems);
     final isLoading =
         (questions.isLoading && !questions.hasValue) || _visibleBounds == null;
 
@@ -155,13 +161,18 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
           Positioned.fill(
             child: _MapSurface(
               mapController: _mapController,
-              questions: items,
+              questions: matchingItems,
               currentCoordinates: _currentCoordinates,
               onMapReady: _handleMapReady,
               onVisibleBoundsChanged: _handleVisibleBoundsChanged,
             ),
           ),
-          _MapTopBar(onSwitchRole: () => context.go('/helper/home')),
+          _MapTopBar(
+            searchController: _searchController,
+            onSearchChanged: _handleSearchChanged,
+            onClearSearch: _clearSearch,
+            onSwitchRole: () => context.go('/helper/home'),
+          ),
           if (questions.hasError)
             Positioned(
               left: 16,
@@ -186,25 +197,41 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
             child: _QuestionSheet(
               questions: visibleItems,
               isLoading: isLoading,
+              searchQuery: _searchQuery,
+              onSizeChanged: _handleQuestionSheetSizeChanged,
             ),
           ),
-          Positioned(
-            right: 18,
-            bottom: 264,
-            child: _CircleMapButton(
-              tooltip: '현재 위치로 이동',
-              icon: _isResolvingLocation ? Icons.sync : Icons.my_location,
-              onTap: _moveToCurrentLocation,
-            ),
-          ),
-          Positioned(
-            right: 18,
-            bottom: 196,
-            child: _MapActionButton(
-              tooltip: '질문하기',
-              icon: Icons.add,
-              label: '질문',
-              onTap: () => context.go('/questions/new'),
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                return Stack(
+                  children: [
+                    Positioned(
+                      right: 18,
+                      bottom: constraints.maxHeight * _questionSheetSize + 16,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          _CircleMapButton(
+                            tooltip: '현재 위치로 이동',
+                            icon: _isResolvingLocation
+                                ? Icons.sync
+                                : Icons.my_location,
+                            onTap: _moveToCurrentLocation,
+                          ),
+                          const SizedBox(height: 12),
+                          _MapActionButton(
+                            tooltip: '질문하기',
+                            icon: Icons.add,
+                            label: '질문',
+                            onTap: () => context.go('/questions/new'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -223,12 +250,27 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
     }).toList();
   }
 
+  void _handleSearchChanged(String value) {
+    if (_searchQuery == value) return;
+    setState(() => _searchQuery = value);
+  }
+
+  void _clearSearch() {
+    _searchController.clear();
+    _handleSearchChanged('');
+  }
+
   void _handleVisibleBoundsChanged(String mapIdentity, LatLngBounds bounds) {
     if (mapIdentity != _mapIdentity(_currentCoordinates)) return;
     final current = _visibleBounds;
     if (current != null && _sameBounds(current, bounds)) return;
     if (!mounted) return;
     setState(() => _visibleBounds = bounds);
+  }
+
+  void _handleQuestionSheetSizeChanged(double size) {
+    if ((_questionSheetSize - size).abs() < .001 || !mounted) return;
+    setState(() => _questionSheetSize = size);
   }
 
   bool _sameBounds(LatLngBounds a, LatLngBounds b) {
@@ -243,6 +285,61 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
 String _mapIdentity(DeviceCoordinates? coordinates) {
   if (coordinates == null) return 'spain-map';
   return 'spain-map-${coordinates.latitude.toStringAsFixed(4)}-${coordinates.longitude.toStringAsFixed(4)}';
+}
+
+List<Question> _searchQuestions(List<Question> questions, String query) {
+  final keyword = query.trim().toLowerCase();
+  if (keyword.isEmpty) return questions;
+
+  return questions.where((question) {
+    return question.title.toLowerCase().contains(keyword) ||
+        question.body.toLowerCase().contains(keyword) ||
+        question.answers.any(
+          (answer) => answer.body.toLowerCase().contains(keyword),
+        ) ||
+        question.comments.any(
+          (comment) => comment.body.toLowerCase().contains(keyword),
+        );
+  }).toList();
+}
+
+_SearchSnippet? _matchingSnippet(Question question, String query) {
+  final keyword = query.trim();
+  if (keyword.isEmpty) return null;
+
+  final candidates = <_SearchSnippet>[
+    _SearchSnippet(label: '내용', text: question.body),
+    for (final answer in question.answers)
+      _SearchSnippet(label: '답변', text: answer.body),
+    for (final comment in question.comments)
+      _SearchSnippet(label: '코멘트', text: comment.body),
+  ];
+  for (final candidate in candidates) {
+    final matchIndex = candidate.text.toLowerCase().indexOf(
+      keyword.toLowerCase(),
+    );
+    if (matchIndex >= 0) {
+      return _SearchSnippet(
+        label: candidate.label,
+        text: _excerptAroundMatch(candidate.text, matchIndex, keyword.length),
+      );
+    }
+  }
+  return null;
+}
+
+String _excerptAroundMatch(String text, int matchIndex, int matchLength) {
+  const contextLength = 36;
+  final start = (matchIndex - contextLength).clamp(0, text.length);
+  final end = (matchIndex + matchLength + contextLength).clamp(0, text.length);
+  return '${start > 0 ? '…' : ''}${text.substring(start, end)}${end < text.length ? '…' : ''}';
+}
+
+class _SearchSnippet {
+  const _SearchSnippet({required this.label, required this.text});
+
+  final String label;
+  final String text;
 }
 
 const _mapLabelLocale = 'ko';
@@ -264,8 +361,16 @@ class QuestionCard extends StatelessWidget {
 }
 
 class _MapTopBar extends StatelessWidget {
-  const _MapTopBar({required this.onSwitchRole});
+  const _MapTopBar({
+    required this.searchController,
+    required this.onSearchChanged,
+    required this.onClearSearch,
+    required this.onSwitchRole,
+  });
 
+  final TextEditingController searchController;
+  final ValueChanged<String> onSearchChanged;
+  final VoidCallback onClearSearch;
   final VoidCallback onSwitchRole;
 
   @override
@@ -285,42 +390,45 @@ class _MapTopBar extends StatelessWidget {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: InkWell(
-              borderRadius: BorderRadius.circular(8),
-              onTap: () => context.go('/questions/new'),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x260B2B34),
-                      blurRadius: 22,
-                      offset: Offset(0, 8),
-                    ),
-                  ],
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: const [
+                  BoxShadow(
+                    color: Color(0x260B2B34),
+                    blurRadius: 22,
+                    offset: Offset(0, 8),
                   ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.search, color: Color(0xFF13857E)),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          '무엇이 궁금하세요?',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: Theme.of(context).textTheme.titleMedium
-                              ?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                      ),
-                    ],
+                ],
+              ),
+              child: TextField(
+                controller: searchController,
+                onChanged: onSearchChanged,
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: '무엇이 궁금하세요?',
+                  prefixIcon: const Icon(
+                    Icons.search,
+                    color: Color(0xFF13857E),
                   ),
+                  suffixIcon: ValueListenableBuilder<TextEditingValue>(
+                    valueListenable: searchController,
+                    builder: (context, value, _) {
+                      if (value.text.isEmpty) return const SizedBox.shrink();
+                      return IconButton(
+                        tooltip: '검색어 지우기',
+                        onPressed: onClearSearch,
+                        icon: const Icon(Icons.close),
+                      );
+                    },
+                  ),
+                  border: InputBorder.none,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 16),
                 ),
+                style: Theme.of(
+                  context,
+                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               ),
             ),
           ),
@@ -1196,10 +1304,17 @@ const _questionSheetMinSize = .20;
 const _questionSheetMaxSize = .68;
 
 class _QuestionSheet extends StatefulWidget {
-  const _QuestionSheet({required this.questions, required this.isLoading});
+  const _QuestionSheet({
+    required this.questions,
+    required this.isLoading,
+    required this.searchQuery,
+    required this.onSizeChanged,
+  });
 
   final List<Question> questions;
   final bool isLoading;
+  final String searchQuery;
+  final ValueChanged<double> onSizeChanged;
 
   @override
   State<_QuestionSheet> createState() => _QuestionSheetState();
@@ -1210,9 +1325,20 @@ class _QuestionSheetState extends State<_QuestionSheet> {
       DraggableScrollableController();
 
   @override
+  void initState() {
+    super.initState();
+    _sheetController.addListener(_notifySizeChanged);
+  }
+
+  @override
   void dispose() {
+    _sheetController.removeListener(_notifySizeChanged);
     _sheetController.dispose();
     super.dispose();
+  }
+
+  void _notifySizeChanged() {
+    widget.onSizeChanged(_sheetController.size);
   }
 
   void _handleDragUpdate(DragUpdateDetails details, double availableHeight) {
@@ -1257,15 +1383,21 @@ class _QuestionSheetState extends State<_QuestionSheet> {
                     },
                   ),
                   const SizedBox(height: 10),
-                  _SheetHeader(count: widget.questions.length),
+                  _SheetHeader(
+                    count: widget.questions.length,
+                    searchQuery: widget.searchQuery,
+                  ),
                   const SizedBox(height: 14),
                   if (widget.isLoading)
                     const _SheetLoading()
                   else if (widget.questions.isEmpty)
-                    const _EmptyMapState()
+                    _EmptyMapState(searchQuery: widget.searchQuery)
                   else
                     for (final question in widget.questions)
-                      _NearbyQuestionTile(question: question),
+                      _NearbyQuestionTile(
+                        question: question,
+                        searchQuery: widget.searchQuery,
+                      ),
                 ],
               ),
             );
@@ -1310,9 +1442,10 @@ class _QuestionSheetDragHandle extends StatelessWidget {
 }
 
 class _SheetHeader extends StatelessWidget {
-  const _SheetHeader({required this.count});
+  const _SheetHeader({required this.count, required this.searchQuery});
 
   final int count;
+  final String searchQuery;
 
   @override
   Widget build(BuildContext context) {
@@ -1327,7 +1460,9 @@ class _SheetHeader extends StatelessWidget {
         ),
         const SizedBox(height: 2),
         Text(
-          '현재 화면 · $count개 질문',
+          searchQuery.trim().isEmpty
+              ? '현재 화면 · $count개 질문'
+              : '현재 화면 · 검색 결과 $count개',
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: Theme.of(
@@ -1340,9 +1475,10 @@ class _SheetHeader extends StatelessWidget {
 }
 
 class _NearbyQuestionTile extends StatelessWidget {
-  const _NearbyQuestionTile({required this.question});
+  const _NearbyQuestionTile({required this.question, this.searchQuery = ''});
 
   final Question question;
+  final String searchQuery;
 
   @override
   Widget build(BuildContext context) {
@@ -1400,13 +1536,24 @@ class _NearbyQuestionTile extends StatelessWidget {
                         ],
                       ),
                       const SizedBox(height: 8),
-                      Text(
-                        question.title,
+                      _HighlightedText(
+                        text: question.title,
+                        query: searchQuery,
                         maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(fontWeight: FontWeight.w800),
                       ),
+                      if (_matchingSnippet(question, searchQuery)
+                          case final snippet?) ...[
+                        const SizedBox(height: 4),
+                        _HighlightedText(
+                          text: '${snippet.label} · ${snippet.text}',
+                          query: searchQuery,
+                          maxLines: 2,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: const Color(0xFF455653)),
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Text(
                         question.locationLabel,
@@ -1444,6 +1591,74 @@ class _NearbyQuestionTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _HighlightedText extends StatelessWidget {
+  const _HighlightedText({
+    required this.text,
+    required this.query,
+    required this.maxLines,
+    this.style,
+  });
+
+  final String text;
+  final String query;
+  final int maxLines;
+  final TextStyle? style;
+
+  @override
+  Widget build(BuildContext context) {
+    final keyword = query.trim();
+    if (keyword.isEmpty) {
+      return Text(
+        text,
+        maxLines: maxLines,
+        overflow: TextOverflow.ellipsis,
+        style: style,
+      );
+    }
+
+    final matches = RegExp(
+      RegExp.escape(keyword),
+      caseSensitive: false,
+    ).allMatches(text).toList();
+    if (matches.isEmpty) {
+      return Text(
+        text,
+        maxLines: maxLines,
+        overflow: TextOverflow.ellipsis,
+        style: style,
+      );
+    }
+
+    final spans = <TextSpan>[];
+    var cursor = 0;
+    for (final match in matches) {
+      if (match.start > cursor) {
+        spans.add(TextSpan(text: text.substring(cursor, match.start)));
+      }
+      spans.add(
+        TextSpan(
+          text: text.substring(match.start, match.end),
+          style: const TextStyle(
+            color: Color(0xFF005F57),
+            backgroundColor: Color(0xFF9FF4E8),
+            fontWeight: FontWeight.w900,
+          ),
+        ),
+      );
+      cursor = match.end;
+    }
+    if (cursor < text.length) {
+      spans.add(TextSpan(text: text.substring(cursor)));
+    }
+
+    return Text.rich(
+      TextSpan(style: style, children: spans),
+      maxLines: maxLines,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }
@@ -1500,7 +1715,9 @@ class _SheetLoading extends StatelessWidget {
 }
 
 class _EmptyMapState extends StatelessWidget {
-  const _EmptyMapState();
+  const _EmptyMapState({required this.searchQuery});
+
+  final String searchQuery;
 
   @override
   Widget build(BuildContext context) {
@@ -1515,14 +1732,18 @@ class _EmptyMapState extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           Text(
-            '현재 지도 화면에 질문이 없습니다',
+            searchQuery.trim().isEmpty
+                ? '현재 지도 화면에 질문이 없습니다'
+                : '현재 지도 화면에 검색 결과가 없습니다',
             style: Theme.of(
               context,
             ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
           ),
           const SizedBox(height: 6),
           Text(
-            '지도를 움직이거나 확대/축소해서 다른 지역 질문을 찾아보세요.',
+            searchQuery.trim().isEmpty
+                ? '지도를 움직이거나 확대/축소해서 다른 지역 질문을 찾아보세요.'
+                : '다른 검색어를 입력하거나 지도를 움직여 보세요.',
             textAlign: TextAlign.center,
             style: Theme.of(
               context,

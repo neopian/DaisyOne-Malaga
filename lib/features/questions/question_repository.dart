@@ -32,7 +32,12 @@ class QuestionRepository {
 
   static const _questionListSelect = '''
     *,
-    question_images(image_url)
+    question_images(image_url),
+    question_comments!question_comments_question_id_fkey(body),
+    answers!answers_question_id_fkey(
+      *,
+      answer_evidence_links(*)
+    )
   ''';
 
   static const _questionSelect = '''

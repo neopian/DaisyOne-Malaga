@@ -223,7 +223,6 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
                           _MapActionButton(
                             tooltip: '질문하기',
                             icon: Icons.add,
-                            label: '질문',
                             onTap: () => context.go('/questions/new'),
                           ),
                         ],
@@ -1453,13 +1452,6 @@ class _SheetHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '지도에 보이는 질문',
-          style: Theme.of(
-            context,
-          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
-        ),
-        const SizedBox(height: 2),
-        Text(
           searchQuery.trim().isEmpty
               ? '현재 화면 · $count개 질문'
               : '현재 화면 · 검색 결과 $count개',
@@ -1500,48 +1492,74 @@ class _NearbyQuestionTile extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                DecoratedBox(
-                  decoration: BoxDecoration(
+                SizedBox(
+                  width: 22,
+                  height: 24,
+                  child: Icon(
+                    question.isOpen
+                        ? Icons.chat_bubble_outline
+                        : Icons.route_outlined,
+                    size: 20,
                     color: question.isOpen
-                        ? const Color(0xFFE0FFF7)
-                        : const Color(0xFFFFF3D8),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: SizedBox(
-                    width: 46,
-                    height: 46,
-                    child: Icon(
-                      question.isOpen
-                          ? Icons.chat_bubble_outline
-                          : Icons.route_outlined,
-                      color: question.isOpen
-                          ? const Color(0xFF008E7C)
-                          : const Color(0xFFD48100),
-                    ),
+                        ? const Color(0xFF008E7C)
+                        : const Color(0xFFD48100),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: _HighlightedText(
+                              text: question.title,
+                              query: searchQuery,
+                              maxLines: 1,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w800),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            formatPoints(question.rewardPoints),
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  color: scheme.primary,
+                                  fontWeight: FontWeight.w900,
+                                ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Row(
                         children: [
                           StatusChip(
                             label: question.status,
                             emphasis: question.isOpen,
+                            compact: true,
                           ),
                           const SizedBox(width: 6),
-                          StatusChip(label: question.urgency),
+                          StatusChip(label: question.urgency, compact: true),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              question.locationLabel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(color: const Color(0xFF60726F)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            formatDate(question.createdAt),
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(color: const Color(0xFF60726F)),
+                          ),
                         ],
-                      ),
-                      const SizedBox(height: 8),
-                      _HighlightedText(
-                        text: question.title,
-                        query: searchQuery,
-                        maxLines: 1,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w800),
                       ),
                       if (_matchingSnippet(question, searchQuery)
                           case final snippet?) ...[
@@ -1554,37 +1572,8 @@ class _NearbyQuestionTile extends StatelessWidget {
                               ?.copyWith(color: const Color(0xFF455653)),
                         ),
                       ],
-                      const SizedBox(height: 4),
-                      Text(
-                        question.locationLabel,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: const Color(0xFF60726F),
-                        ),
-                      ),
                     ],
                   ),
-                ),
-                const SizedBox(width: 8),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      formatPoints(question.rewardPoints),
-                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: scheme.primary,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      formatDate(question.createdAt),
-                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: const Color(0xFF60726F),
-                      ),
-                    ),
-                  ],
                 ),
               ],
             ),
@@ -1782,26 +1771,32 @@ class _MapActionButton extends StatelessWidget {
   const _MapActionButton({
     required this.tooltip,
     required this.icon,
-    required this.label,
     required this.onTap,
   });
 
   final String tooltip;
   final IconData icon;
-  final String label;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return FloatingActionButton.extended(
-      tooltip: tooltip,
-      heroTag: 'question-home-create',
-      elevation: 8,
-      backgroundColor: const Color(0xFF10D7C3),
-      foregroundColor: const Color(0xFF042B30),
-      onPressed: onTap,
-      icon: Icon(icon),
-      label: Text(label, style: const TextStyle(fontWeight: FontWeight.w900)),
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: const Color(0xFF10D7C3),
+        elevation: 4,
+        shadowColor: const Color(0x330B2B34),
+        shape: const CircleBorder(),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const CircleBorder(),
+          child: SizedBox(
+            width: 42,
+            height: 42,
+            child: Icon(icon, size: 21, color: const Color(0xFF042B30)),
+          ),
+        ),
+      ),
     );
   }
 }

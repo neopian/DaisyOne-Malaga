@@ -7,7 +7,6 @@ import 'package:latlong2/latlong.dart' hide Path;
 import '../../core/geo/spain_geo.dart';
 import '../../core/services/location_service.dart';
 import '../../core/utils/formatters.dart';
-import '../../shared/models/app_user.dart';
 import '../../shared/models/question.dart';
 import '../../shared/widgets/app_drawer.dart';
 import '../../shared/widgets/status_chip.dart';
@@ -149,7 +148,6 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
   @override
   Widget build(BuildContext context) {
     final questions = ref.watch(questionsProvider);
-    final profile = ref.watch(currentProfileProvider).asData?.value;
     final items = questions.asData?.value ?? const <Question>[];
     final visibleItems = _visibleQuestions(items);
     final isLoading =
@@ -169,9 +167,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
             ),
           ),
           _MapTopBar(
-            profile: profile,
             isLoading: isLoading || _isResolvingLocation,
-            hasCurrentLocation: _currentCoordinates != null,
             onRefresh: _refreshData,
             onSwitchRole: () => context.go('/helper/home'),
           ),
@@ -278,23 +274,18 @@ class QuestionCard extends StatelessWidget {
 
 class _MapTopBar extends StatelessWidget {
   const _MapTopBar({
-    required this.profile,
     required this.isLoading,
-    required this.hasCurrentLocation,
     required this.onRefresh,
     required this.onSwitchRole,
   });
 
-  final AppUser? profile;
   final bool isLoading;
-  final bool hasCurrentLocation;
   final VoidCallback onRefresh;
   final VoidCallback onSwitchRole;
 
   @override
   Widget build(BuildContext context) {
     final padding = MediaQuery.paddingOf(context);
-    final location = _profileLocation(profile);
 
     return Positioned(
       left: 16,
@@ -334,28 +325,12 @@ class _MapTopBar extends StatelessWidget {
                       const Icon(Icons.search, color: Color(0xFF13857E)),
                       const SizedBox(width: 10),
                       Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '무엇이 궁금하세요?',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.w800),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              hasCurrentLocation
-                                  ? '현재 위치가 지도에 표시됩니다'
-                                  : location,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: const Color(0xFF60726F)),
-                            ),
-                          ],
+                        child: Text(
+                          '무엇이 궁금하세요?',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium
+                              ?.copyWith(fontWeight: FontWeight.w800),
                         ),
                       ),
                     ],
@@ -379,13 +354,6 @@ class _MapTopBar extends StatelessWidget {
         ],
       ),
     );
-  }
-
-  static String _profileLocation(AppUser? profile) {
-    final country = profile?.currentCountry?.trim() ?? '';
-    final city = profile?.currentCity?.trim() ?? '';
-    if (country.isEmpty && city.isEmpty) return '현재 위치 기준으로 질문을 찾아요';
-    return [country, city].where((value) => value.isNotEmpty).join(' ');
   }
 }
 

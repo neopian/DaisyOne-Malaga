@@ -100,8 +100,13 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
   }
 
   bool _hasRequiredLocation() {
+    final latitude = _latitude;
+    final longitude = _longitude;
     return SpainGeo.isSpainCountry(_country.text) &&
-        _city.text.trim().isNotEmpty;
+        _city.text.trim().isNotEmpty &&
+        latitude != null &&
+        longitude != null &&
+        SpainGeo.isWithinSpainBounds(latitude: latitude, longitude: longitude);
   }
 
   Future<void> _submit() async {
@@ -169,8 +174,7 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
         )) {
       return (latitude: latitude, longitude: longitude);
     }
-    final place = SpainGeo.placeForCity(_city.text);
-    return (latitude: place.latitude, longitude: place.longitude);
+    throw StateError(_locationUnavailableText);
   }
 
   @override
@@ -198,7 +202,7 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage> {
                 isLoading: _isResolvingLocation,
                 errorText: _locationError,
                 lockCountry: true,
-                showActions: false,
+                allowManualEdit: false,
                 emptyText: _locationUnavailableText,
                 onEdit: () {},
                 onDone: () {},

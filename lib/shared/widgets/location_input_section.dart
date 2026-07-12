@@ -14,6 +14,7 @@ class LocationInputSection extends StatelessWidget {
     this.errorText,
     this.lockCountry = false,
     this.showActions = true,
+    this.allowManualEdit = true,
     this.emptyText = '위치가 설정되지 않았습니다',
     this.loadingText = '위치 확인 중',
   });
@@ -29,6 +30,7 @@ class LocationInputSection extends StatelessWidget {
   final String? errorText;
   final bool lockCountry;
   final bool showActions;
+  final bool allowManualEdit;
   final String emptyText;
   final String loadingText;
 
@@ -129,7 +131,7 @@ class _LocationSummary extends StatelessWidget {
                 onPressed: section.onUseCurrentLocation,
                 icon: const Icon(Icons.my_location_outlined),
               ),
-            if (section.showActions)
+            if (section.showActions && section.allowManualEdit)
               TextButton.icon(
                 onPressed: section.onEdit,
                 icon: const Icon(Icons.edit_location_alt_outlined),

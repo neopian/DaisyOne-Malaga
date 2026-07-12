@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/geo/spain_geo.dart';
 import '../../core/services/location_service.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/models/app_user.dart';
@@ -20,9 +19,7 @@ class ProfilePage extends ConsumerStatefulWidget {
 class _ProfilePageState extends ConsumerState<ProfilePage> {
   final _country = TextEditingController();
   final _city = TextEditingController();
-  bool _isSaving = false;
   bool _isResolvingLocation = false;
-  bool _isEditingLocation = false;
   bool _didSeedProfileLocation = false;
   String? _locationError;
 
@@ -42,29 +39,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     super.dispose();
   }
 
-  Future<void> _saveLocation() async {
-    if (_city.text.trim().isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('스페인 도시를 입력해주세요.')));
-      return;
-    }
-    setState(() => _isSaving = true);
-    final messenger = ScaffoldMessenger.of(context);
-    try {
-      await ref
-          .read(profileRepositoryProvider)
-          .updateLocation(country: 'Spain', city: _city.text);
-      ref.invalidate(currentProfileProvider);
-      if (mounted) setState(() => _isEditingLocation = false);
-      messenger.showSnackBar(const SnackBar(content: Text('프로필을 저장했습니다.')));
-    } catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text(error.toString())));
-    } finally {
-      if (mounted) setState(() => _isSaving = false);
-    }
-  }
-
   Future<void> _useCurrentLocation() async {
     if (_isResolvingLocation) return;
     setState(() {
@@ -73,12 +47,15 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     });
     try {
       final location = await const LocationService().getCurrentLocation();
+      await ref
+          .read(profileRepositoryProvider)
+          .updateLocation(country: location.country, city: location.city);
       if (!mounted) return;
       setState(() {
         _country.text = location.country;
         _city.text = location.city;
-        _isEditingLocation = false;
       });
+      ref.invalidate(currentProfileProvider);
     } catch (error) {
       if (!mounted) return;
       setState(() => _locationError = _locationMessage(error));
@@ -93,9 +70,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     if (_city.text.trim().isNotEmpty) {
       return;
     }
-    _country.text = SpainGeo.isSpainCountry(user.currentCountry ?? '')
-        ? 'Spain'
-        : 'Spain';
+    _country.text = 'Spain';
     _city.text = user.currentCity ?? '';
   }
 
@@ -190,12 +165,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       LocationInputSection(
                         countryController: _country,
                         cityController: _city,
-                        isEditing: _isEditingLocation,
-                        isLoading: _isResolvingLocation || _isSaving,
+                        isEditing: false,
+                        isLoading: _isResolvingLocation,
                         errorText: _locationError,
                         lockCountry: true,
-                        onEdit: () => setState(() => _isEditingLocation = true),
-                        onDone: _saveLocation,
+                        allowManualEdit: false,
+                        onEdit: () {},
+                        onDone: () {},
                         onUseCurrentLocation: _useCurrentLocation,
                       ),
                     ],

@@ -128,7 +128,7 @@ class LocationService {
     } on StateError {
       rethrow;
     } catch (_) {
-      throw StateError('현재 위치를 자동으로 확인하지 못했습니다. 스페인 도시를 직접 입력해주세요.');
+      throw StateError('현재 위치를 자동으로 확인하지 못했습니다. 위치 권한과 위치 서비스를 확인해주세요.');
     }
   }
 

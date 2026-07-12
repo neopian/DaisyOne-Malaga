@@ -45,7 +45,7 @@ class AppDrawer extends ConsumerWidget {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      '잔액 ${formatPoints(profile.pointBalance)}',
+                      '남은 포인트 ${formatPoints(profile.pointBalance)}',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: Theme.of(context).colorScheme.primary,
                         fontWeight: FontWeight.w700,
@@ -59,18 +59,18 @@ class AppDrawer extends ConsumerWidget {
         ),
         ListTile(
           leading: const Icon(Icons.home_outlined),
-          title: const Text('질문자 홈'),
+          title: const Text('홈'),
           onTap: () => router.go('/home'),
-        ),
-        ListTile(
-          leading: const Icon(Icons.account_circle_outlined),
-          title: const Text('내 프로필'),
-          onTap: () => router.go('/profile'),
         ),
         ListTile(
           leading: const Icon(Icons.receipt_long_outlined),
           title: const Text('포인트 내역'),
           onTap: () => router.go('/points'),
+        ),
+        ListTile(
+          leading: const Icon(Icons.account_circle_outlined),
+          title: const Text('내 프로필'),
+          onTap: () => router.go('/profile'),
         ),
         if (profile?.isAdmin ?? false)
           ListTile(

@@ -7,7 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'auth_repository.dart';
 import 'session_scope.dart';
 
-const _devLoginPassword = String.fromEnvironment('DEV_LOGIN_PASSWORD');
+const _devLoginPassword = 'daisy-dev-1234';
 final _showLoginShortcuts =
     (kDebugMode || bool.fromEnvironment('ENABLE_LOGIN_SHORTCUTS')) &&
     _devLoginPassword.isNotEmpty;
@@ -150,7 +150,8 @@ class _AuthPageState extends ConsumerState<AuthPage> {
     if (message.contains('Invalid login credentials') ||
         message.contains('Database error querying schema') ||
         message.contains('unexpected_failure')) {
-      return '개발용 로그인 seed SQL을 다시 실행해 주세요. 원문: $message';
+      return '개발용 shortcut 계정이 준비되지 않았어요. '
+          '개발용 로그인 seed SQL을 다시 실행해 주세요. 원문: $message';
     }
     return message;
   }

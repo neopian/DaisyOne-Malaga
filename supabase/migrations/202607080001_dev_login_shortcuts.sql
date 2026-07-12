@@ -1,11 +1,11 @@
 create extension if not exists pgcrypto;
 
-do $$
-begin
-  if nullif(current_setting('app.dev_login_password', true), '') is null then
-    raise exception 'Set app.dev_login_password before running this script.';
-  end if;
-end $$;
+-- Local development only. The debug app uses this same shortcut password.
+select set_config(
+  'app.dev_login_password',
+  'daisy-dev-1234',
+  false
+);
 
 do $$
 begin

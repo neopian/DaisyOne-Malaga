@@ -196,11 +196,10 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
             onSearchChanged: _handleSearchChanged,
             onClearSearch: _clearSearch,
             onSwitchRole: () => context.go('/helper/home'),
+            onOpenActivity: () => context.go('/activity/traveler'),
             notices: _questionSheetSize > .55
                 ? const []
                 : [
-                    if (questions.hasError)
-                      _MapNotice(message: questions.error.toString()),
                     if (_locationError != null)
                       _MapNotice(
                         message:
@@ -222,6 +221,8 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
             child: _QuestionSheet(
               questions: visibleItems,
               isLoading: isLoading,
+              hasError: questions.hasError,
+              onRetry: () => ref.invalidate(questionsProvider),
               searchQuery: _searchQuery,
               onSizeChanged: _handleQuestionSheetSizeChanged,
               onCreateQuestion: () => context.go('/questions/new'),
@@ -398,6 +399,7 @@ class _MapTopBar extends StatelessWidget {
     required this.onSearchChanged,
     required this.onClearSearch,
     required this.onSwitchRole,
+    required this.onOpenActivity,
     required this.notices,
   });
 
@@ -405,6 +407,7 @@ class _MapTopBar extends StatelessWidget {
   final ValueChanged<String> onSearchChanged;
   final VoidCallback onClearSearch;
   final VoidCallback onSwitchRole;
+  final VoidCallback onOpenActivity;
   final List<Widget> notices;
 
   @override
@@ -425,11 +428,28 @@ class _MapTopBar extends StatelessWidget {
       onClear: onClearSearch,
       prefixAction: compact ? menu : null,
       trailingAction: compact
-          ? IconButton(
-              tooltip: '답변자로 전환',
-              onPressed: onSwitchRole,
-              icon: const Icon(Icons.support_agent_rounded),
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: '내 질문',
+                  onPressed: onOpenActivity,
+                  icon: const Icon(Icons.inbox_outlined),
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
+                ),
+                IconButton(
+                  tooltip: '답변자로 전환',
+                  onPressed: onSwitchRole,
+                  icon: const Icon(Icons.support_agent_rounded),
+                  constraints: const BoxConstraints(
+                    minWidth: 48,
+                    minHeight: 48,
+                  ),
+                ),
+              ],
             )
           : null,
     );
@@ -469,6 +489,15 @@ class _MapTopBar extends StatelessWidget {
                                       fontWeight: FontWeight.w700,
                                       letterSpacing: -.7,
                                     ),
+                                  ),
+                                ),
+                                IconButton(
+                                  tooltip: '내 질문',
+                                  onPressed: onOpenActivity,
+                                  icon: const Icon(Icons.inbox_outlined),
+                                  constraints: const BoxConstraints(
+                                    minWidth: 48,
+                                    minHeight: 48,
                                   ),
                                 ),
                                 Tooltip(
@@ -1178,6 +1207,8 @@ class _QuestionSheet extends StatefulWidget {
   const _QuestionSheet({
     required this.questions,
     required this.isLoading,
+    required this.hasError,
+    required this.onRetry,
     required this.searchQuery,
     required this.onSizeChanged,
     required this.onCreateQuestion,
@@ -1185,6 +1216,8 @@ class _QuestionSheet extends StatefulWidget {
 
   final List<Question> questions;
   final bool isLoading;
+  final bool hasError;
+  final VoidCallback onRetry;
   final String searchQuery;
   final ValueChanged<double> onSizeChanged;
   final VoidCallback onCreateQuestion;
@@ -1253,6 +1286,7 @@ class _QuestionSheetState extends State<_QuestionSheet> {
                 count: widget.questions.length,
                 searchQuery: widget.searchQuery,
                 isLoading: widget.isLoading,
+                hasError: widget.hasError,
                 onCreateQuestion: widget.onCreateQuestion,
               ),
             );
@@ -1265,6 +1299,8 @@ class _QuestionSheetState extends State<_QuestionSheet> {
             final items = <Widget>[
               if (widget.isLoading)
                 const _SheetLoading()
+              else if (widget.hasError)
+                _QuestionFeedError(onRetry: widget.onRetry)
               else if (widget.questions.isEmpty)
                 _EmptyMapState(searchQuery: widget.searchQuery)
               else
@@ -1392,12 +1428,14 @@ class _SheetHeader extends StatelessWidget {
     required this.count,
     required this.searchQuery,
     required this.isLoading,
+    required this.hasError,
     required this.onCreateQuestion,
   });
 
   final int count;
   final String searchQuery;
   final bool isLoading;
+  final bool hasError;
   final VoidCallback onCreateQuestion;
 
   @override
@@ -1415,7 +1453,11 @@ class _SheetHeader extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          isLoading ? '주변 질문을 살펴보는 중' : '현재 지도에서 $count개',
+          isLoading
+              ? '주변 질문을 살펴보는 중'
+              : hasError
+              ? '연결 후 다시 확인해주세요'
+              : '현재 지도에서 $count개',
           style: theme.textTheme.bodySmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -1451,6 +1493,34 @@ class _SheetHeader extends StatelessWidget {
       },
     );
   }
+}
+
+class _QuestionFeedError extends StatelessWidget {
+  const _QuestionFeedError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    child: Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('질문을 불러오지 못했어요', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 8),
+          const Text('현재 목록을 확인할 수 없어요. 연결 후 다시 불러와주세요.'),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('질문 다시 불러오기'),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _NearbyQuestionTile extends StatelessWidget {

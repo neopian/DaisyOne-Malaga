@@ -15,6 +15,15 @@ PLUGIN_BUNDLES = (
     'share_plus_privacy', 'shared_preferences_foundation_privacy',
     'url_launcher_ios_privacy',
 )
+IOS_MINIMUM = (15, 0, 0)
+
+
+def os_version(value):
+    """Parse plist versions numerically; 15.0 and 15.0.0 denote one floor."""
+    if not isinstance(value, str) or not re.fullmatch(r'\d+(?:\.\d+){0,2}', value):
+        return None
+    components = tuple(int(part) for part in value.split('.'))
+    return components + (0,) * (3 - len(components))
 
 
 def inspect_app(app):
@@ -34,9 +43,26 @@ def inspect_app(app):
     if not sdk_match or int(sdk_match[1]) < 26:
         errors.append(f'Built bundle does not record an iOS 26+ SDK: {sdk!r}')
     target = str(info.get('MinimumOSVersion', ''))
-    target_match = re.fullmatch(r'(\d+)(?:\.\d+)*', target)
-    if not target_match or int(target_match[1]) < 13:
-        errors.append(f'Built bundle minimum OS must be iOS 13+: {target!r}')
+    if os_version(info.get('MinimumOSVersion')) != IOS_MINIMUM:
+        errors.append(f'Built bundle minimum OS must match the approved iOS 15.0 floor: {target!r}')
+    frameworks = []
+    framework_root = app / 'Frameworks'
+    required_frameworks = {framework_root / name for name in ('App.framework', 'Flutter.framework')}
+    for framework in sorted(required_frameworks | set(framework_root.rglob('*.framework'))):
+        relative = str(framework.relative_to(app))
+        try:
+            framework_info = plistlib.loads((framework / 'Info.plist').read_bytes())
+            if not isinstance(framework_info, dict):
+                raise ValueError('Info.plist is not a dictionary')
+            minimum = framework_info.get('MinimumOSVersion')
+            parsed = os_version(minimum)
+            if parsed is None:
+                errors.append(f'Embedded framework has no valid minimum OS: {relative}: {minimum!r}')
+            elif parsed > IOS_MINIMUM:
+                errors.append(f'Embedded framework requires newer than iOS 15.0: {relative}: {minimum!r}')
+            frameworks.append({'path': relative, 'minimum_os': minimum})
+        except (OSError, ValueError, plistlib.InvalidFileException) as error:
+            errors.append(f'Cannot parse embedded framework Info.plist: {relative}: {error}')
     executable = info.get('CFBundleExecutable')
     if (not isinstance(executable, str) or not executable
             or Path(executable).name != executable
@@ -80,7 +106,7 @@ def inspect_app(app):
     return {'scope': 'unsigned bundle structure and resource presence only',
             'app': str(app), 'sdk': sdk, 'minimum_os': target,
             'bundle_id': info.get('CFBundleIdentifier'),
-            'manifests': inventory, 'errors': errors,
+            'frameworks': frameworks, 'manifests': inventory, 'errors': errors,
             'not_verified': ['code signing', 'device execution', 'privacy reason correctness',
                              'collection or tracking completeness', 'SDK signatures',
                              'production connectivity', 'App Store eligibility']}

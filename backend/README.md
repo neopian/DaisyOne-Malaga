@@ -1,4 +1,4 @@
-# Self-hosted Malaga API
+# Self-hosted travel Q&A API
 
 Node 22+ (Docker uses Node 24), plain PostgreSQL 15+, and private local disk storage. No Supabase, hosted SQL subscription, or paid API is required. Points are **mock credits only**, not money. Account verification, password recovery, export and deletion are implemented with explicitly configured self-hosted mail; delivery is disabled by default. See [account lifecycle](../docs/ACCOUNT_BACKEND.md) for exact contracts, deletion consequences, local-only testing, and launch decisions still required.
 
@@ -78,9 +78,12 @@ Successful question feeds/details, guide feeds, and point ledgers can use stream
 | GET `/profile` | — | Full `AppUser` |
 | PATCH `/profile` | `current_country, current_city` (either optional/null) | Updated `AppUser`; no role/balance/name mutations |
 | GET `/guide/questions` | — | Claimable regional question array for approved guide; otherwise 403 `HELPER_NOT_APPROVED` |
+| GET `/guide/discovery` | Optional signed `cursor` | Compact claimable regional work, 20 newest-first items plus `next_cursor`; current guide approval required |
 | GET `/guide/me` | — | Own accepted-answer count, earned/pending mock points, application status and activity regions |
 | GET `/points` | — | Own ledger, newest first, up to 500 |
 | GET `/questions?status=open` | Optional status filter | Visible questions, newest first, up to 200 |
+| GET `/activity/questions` | `role`, `view`, optional signed cursor | Own compact work, 20 newest-first items plus `next_cursor`; see [personal activity](../docs/PERSONAL_ACTIVITY.md) |
+| GET `/admin/operations/questions` | `status`, optional country+city and signed cursor | Current active-admin-only compact oldest-first work, 20 items, scoped counts and restriction flags; see [operator view](../docs/OPERATIONS_QUEUE.md) |
 | GET `/questions/:id` | — | Question with `question_images`, `question_comments.commenter`, `answers.answer_evidence_links` |
 | POST `/questions` | `country, city, region_name?, category, urgency, title, body, reward_points, latitude?, longitude?, images?` | 201 `{id}`, holds mock credits atomically |
 | POST `/questions/:id/accept` | `{}` | `{ok:true}`; claims open question for matching approved helper |
@@ -119,6 +122,10 @@ Authenticated `GET /api/guide/me` works for every user, including someone who ha
 
 Authenticated `GET /api/guide/questions` returns only open, unexpired, escrow-held questions matching this approved guide’s activity regions, excluding their own questions. It uses the exact same case-insensitive country/city/optional-region predicate as claim; a blank question or guide region is city-wide. Missing/pending/rejected/suspended approval returns `403 HELPER_NOT_APPROVED`. Nested details retain the shared-lock read protection. The feed is a current view, not a reservation: the claim endpoint remains authoritative if another guide claims first. General `/questions` map/search behavior is unchanged.
 
+`GET /api/guide/discovery` is the compact, paginated guide list. It returns `{items,next_cursor}` with at most 20 questions ordered by `(created_at,id)` descending, preserving PostgreSQL microseconds. Pass the opaque `next_cursor` as the next request's `cursor`; null means the current list is exhausted. Only this optional parameter is supported, and duplicate/unknown parameters return `400 INVALID_DISCOVERY_QUERY`. Malformed, modified, other-account or other-endpoint cursors return `400 INVALID_DISCOVERY_CURSOR`.
+
+Each item contains only `id,user_id,assigned_helper_user_id,country,city,region_name,category,urgency,title,reward_points,status,created_at,updated_at,expires_at`. No question body, images, comments, answers, evidence, accepted-answer identifier, participant profile, coordinates, escrow or moderation metadata is loaded or returned. Open/unassigned/held/unexpired, own-question exclusion, approved region matching, hidden content, suspended travelers and bilateral blocks are checked before pagination. Administrators need their own approved application and receive the same ordinary discovery visibility as other guides. The account, session and application are checked again inside the safety transaction and held through the read; every page uses current approval, regions and visibility. A cursor is only a position and never preserves revoked access. Newer questions appear on refresh, and claim still rechecks eligibility. No assignment, balance, escrow, status or moderation state changes during discovery. The existing status/time index supports this ordering; no migration is needed. Legacy `/guide/questions` remains unchanged for older clients.
+
 Question list/detail additionally includes `assigned_helper: null` or `{id,name,accepted_answer_count,application_status,activity_regions}` for its assigned participant. It is visible only through the already-authorized question response and contains no email, profile location, balance, earnings, pending points, or invented rating. There is no arbitrary-user guide lookup. Counts and totals are derived from persisted work/ledger rows in one query, never mutable reputation counters; duplicate acceptance cannot inflate them. No leaderboard, stars, cash reward or real payout is introduced.
 
 ## Idempotency, transactions, and authorization
@@ -132,6 +139,30 @@ All balances/roles/helper status/ownership come from the database, never the cli
 An expired open question cannot be claimed; its owner may cancel for the full refund. There is no automatic expiry scheduler or forfeiture. Once assigned, cancellation/refund is rejected; disputes/manual operational policy are outside this MVP.
 
 Disk write failures roll back the hold/question. A failed/ambiguous commit triggers a reference check before file cleanup, preserving any possibly committed image. A process crash can leave harmless unreferenced files; back up PostgreSQL and uploads together and reconcile orphans offline, never delete files merely because a request timed out.
+
+## Private exchange issue records
+
+`진행 문제 기록` is separate from abuse `/reports`. An owner and their assigned guide can each record one issue per exchange while it is assigned/answered with held mock points. Recording or marking a review changes no question/answer status, assignment, balances, escrow, ledger, block, moderation flag or guide approval. It promises no response, handling time, refund, reassignment or settlement.
+
+All routes below have the `/api` prefix. List responses are `{items,next_cursor}`, at most 20 rows ordered by precise `(created_at,id)`, newest first for own records and oldest first for eligibility/admin queues; use the opaque signed `cursor` for the next page. Cursors bind the user, list and status, and unknown/repeated query parameters are rejected.
+
+| Route | Request | Response |
+| --- | --- | --- |
+| GET `/exchange-issues/eligible` | Optional `cursor` | Own assigned/answered held exchanges: `question_id,role,title,content_available,status,created_at,updated_at,own_issue_id` |
+| GET `/exchange-issues/eligible/:questionId` | — | One own eligible exchange with the same compact fields/redaction; unrelated or ineligible references return 404 |
+| POST `/exchange-issues` | `question_id,reason,details?`; required Idempotency-Key | 201 `{id}`; identical existing normalized intent under another key returns 200 `{id}` |
+| GET `/exchange-issues` | Optional `cursor` | Own records: `id,question_id,role,reason,details,status,created_at,reviewed_at` |
+| GET `/exchange-issues/:id` | — | One own record with the same public fields; another reporter’s record returns 404 |
+| GET `/admin/exchange-issues` | `status=open|reviewed` (default open), optional `cursor` | Current active-admin records: own-record fields plus `reporter_id,other_participant_id,reviewed_by,review_note` |
+| POST `/admin/exchange-issues/:id/review` | `note?`; required Idempotency-Key | `{ok:true}`; one review preserving its first author, text and timestamp |
+
+Roles are `traveler` or `guide`; reasons are `waiting_for_response`, `answer_problem`, `cannot_continue`, or `other`; statuses are `open` or `reviewed`. Optional details/note are trimmed, blank becomes null, maximum 1,000 characters. Mutation JSON is capped at 8 KiB. Content text is never stored in idempotency responses.
+
+Intake derives both participants from the locked question. Unrelated users, including administrators, cannot file. A hidden question, bilateral block or suspended counterpart keeps its safe reference selectable, with null title and `content_available:false`; no question body, media, counterpart profile or counterpart issue is returned. This visibility rule also applies to administrators using the participant route. Actor suspension blocks these routes while account export/deletion remain available. No guide approval is needed to record an existing commitment.
+
+New records are limited to 30 per reporter per rolling 24 hours, serialized against concurrent submissions; duplicates do not consume the quota. Existing identical text remains retryable after the exchange completes. Changed existing text returns `409 ISSUE_ALREADY_EXISTS`; ineligible new exchanges return `409 EXCHANGE_NOT_ELIGIBLE`. The same reviewer may retry identical review text; competing reviewers or changed text return `409 ISSUE_ALREADY_REVIEWED` without overwriting the first review. Current sessions and participant/admin authority are checked again before cached replay. The lock order retains idempotency before resource locks and question before reporter, matching acceptance.
+
+Account exports include `exchange_issues` with only the user's own issue text and `exchange_issue_reviews` with only their authored review notes. Both contribute to row and byte preflight limits. Deleting either participant or the question cascades issue content. Deleting an unrelated reviewer clears their note before detaching the reviewer identity, preserving only the reviewed marker. No additional retention period is introduced.
 
 ## Verification
 
@@ -150,7 +181,7 @@ Photo-specific tests decode all supported formats, verify private metadata is ab
 
 - This is an MVP backend, not a payment processor. No cash conversion, external payment, or paid service is connected
 - Login/register and account lifecycle routes use atomic PostgreSQL quotas across instances: authentication allows 60 attempts per source IP and 20 login/register attempts per normalized email per 15 minutes, including nonexistent accounts. Account recovery/verification/export/deletion add route-specific limits. Behind a proxy, connections conservatively share its address; forwarding headers are not trusted. A reviewed proxy/client-IP design and load testing remain deployment work
-- API reads are bounded recent lists, without pagination yet. Higher-scale search/pagination and operational alerts remain deployment work
+- Personal activity, guide discovery, operator demand and exchange issue lists use fixed-size signed-cursor pagination. General `/questions`, legacy `/guide/questions` and the point ledger remain bounded recent lists; higher-scale public discovery/search, ledger pagination and operational alert delivery remain future work
 - Back up PostgreSQL, private uploads, and secrets securely. Use a least-privilege application database role and private network access
 - Account maintenance removes already-expired sessions and auth replay envelopes in at most 250-row batches per table per tick, preserving current artifacts and skipping locked rows across instances. It does not prune financial/content idempotency, ledger rows, or mail-artifact manifests, or promise audit-history retention
 - No production instance is deployed by these files or tests

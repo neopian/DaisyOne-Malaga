@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 import 'package:local_qa_concierge/app/theme.dart';
+import 'package:local_qa_concierge/core/services/api_service.dart';
+import 'package:local_qa_concierge/features/auth/auth_repository.dart';
+import 'package:local_qa_concierge/features/guide_discovery/guide_discovery_repository.dart';
 import 'package:local_qa_concierge/features/helper_application/helper_home_page.dart';
 import 'package:local_qa_concierge/features/helper_application/helper_repository.dart';
 import 'package:local_qa_concierge/features/profile/profile_repository.dart';
@@ -16,6 +19,9 @@ import 'package:local_qa_concierge/shared/models/guide_summary.dart';
 import 'package:local_qa_concierge/shared/models/helper_application.dart';
 import 'package:local_qa_concierge/shared/models/question.dart';
 import 'package:local_qa_concierge/shared/widgets/guide_activity_card.dart';
+
+import 'guide_discovery_feed_test.dart'
+    show DiscoveryTestAuth, DiscoveryTestRepository;
 
 const _summary = GuideSummary(
   acceptedAnswerCount: 1,
@@ -76,6 +82,16 @@ Future<void> _home(
   Future<GuideSummary> Function()? summary,
   Future<List<Question>> Function()? questions,
 }) async {
+  final api = ApiClient(baseUrl: 'https://example.test/api');
+  final auth = DiscoveryTestAuth(api);
+  final repository = DiscoveryTestRepository(api)
+    ..response = (_) async => GuideDiscoveryPageData(
+      items: await (questions?.call() ?? Future.value(<Question>[])),
+    );
+  addTearDown(() {
+    auth.dispose();
+    api.dispose();
+  });
   final router = GoRouter(
     initialLocation: '/helper/home',
     routes: [
@@ -104,15 +120,15 @@ Future<void> _home(
           (ref) => summary?.call() ?? Future.value(_summary),
         ),
         helperApplicationProvider.overrideWith((ref) async => application),
-        helperOpenQuestionsProvider.overrideWith(
-          (ref) => questions?.call() ?? Future.value([]),
-        ),
+        authRepositoryProvider.overrideWithValue(auth),
+        guideDiscoveryRepositoryProvider.overrideWithValue(repository),
       ],
       child: MaterialApp.router(theme: buildAppTheme(), routerConfig: router),
     ),
   );
   await tester.pump();
   await tester.pump();
+  addTearDown(() async => tester.pumpWidget(const SizedBox()));
 }
 
 void main() {

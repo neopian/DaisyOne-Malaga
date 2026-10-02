@@ -236,3 +236,13 @@ refund/reward/new-write races, safety cascades, and suspended-reviewer note eras
 expiry cleanup against real PostgreSQL, live sessions and exact auth replays
 across API instances, preservation of old core idempotency/ledger rows and mail
 manifests, and nonblocking progress around already-locked expired records.
+
+## Private exchange issue records
+
+Account export now includes `exchange_issues` (reporter-owned text only) and
+`exchange_issue_reviews` (the exporting user's authored internal reviews).
+Both are included in SQL row/byte bounds before materialization. Deleting either
+participant or its question cascades the issue; deleting an unrelated reviewer
+clears their authored internal note before the reviewer foreign key is nulled.
+See [issue contracts and tests](EXCHANGE_ISSUES.md). These additions do not set an
+operator retention period or claim deletion from unconfigured external backups.

@@ -36,7 +36,7 @@ class AppDrawer extends ConsumerWidget {
               ),
               const SizedBox(width: 10),
               Text(
-                'malaga',
+                '여행 Q&A',
                 style: Theme.of(
                   context,
                 ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
@@ -62,6 +62,16 @@ class AppDrawer extends ConsumerWidget {
           leading: const Icon(Icons.edit_note_outlined),
           title: const Text('질문하기'),
           onTap: () => open('/questions/new'),
+        ),
+        ListTile(
+          leading: const Icon(Icons.forum_outlined),
+          title: const Text('내 질문'),
+          onTap: () => open('/activity/traveler'),
+        ),
+        ListTile(
+          leading: const Icon(Icons.assignment_outlined),
+          title: const Text('맡은 질문'),
+          onTap: () => open('/activity/guide'),
         ),
         ListTile(
           leading: const Icon(Icons.support_agent_outlined),

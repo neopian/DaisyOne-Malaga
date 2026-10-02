@@ -20,10 +20,12 @@ class MvpRules {
         currentUserId.trim() != questionOwnerId.trim();
   }
 
-  /// The same allowlist is used when adding, submitting and opening evidence.
+  /// The same public-host allowlist is used when adding, submitting and opening
+  /// evidence. Local and IP hosts are disallowed by the server's URL contract.
   /// Do not let Uri's normalization silently repair ambiguous authorities.
   static bool isValidEvidenceUrl(String url) {
     if (url.isEmpty ||
+        url.length > 2048 ||
         RegExp(
           r'[\s\x00-\x20\x7f-\x9f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]',
         ).hasMatch(url) ||
@@ -50,20 +52,11 @@ class MvpRules {
         return false;
       }
 
-      final String host;
-      final String portSuffix;
-      if (authority.startsWith('[')) {
-        final closingBracket = authority.indexOf(']');
-        if (closingBracket == -1) return false;
-        host = authority.substring(1, closingBracket);
-        Uri.parseIPv6Address(host);
-        portSuffix = authority.substring(closingBracket + 1);
-      } else {
-        final colon = authority.indexOf(':');
-        host = colon == -1 ? authority : authority.substring(0, colon);
-        portSuffix = colon == -1 ? '' : authority.substring(colon);
-        if (!_isValidEvidenceHost(host)) return false;
-      }
+      if (authority.startsWith('[')) return false;
+      final colon = authority.indexOf(':');
+      final host = colon == -1 ? authority : authority.substring(0, colon);
+      final portSuffix = colon == -1 ? '' : authority.substring(colon);
+      if (!_isValidEvidenceHost(host)) return false;
 
       if (portSuffix.isNotEmpty) {
         if (!RegExp(r'^:[0-9]+$').hasMatch(portSuffix)) return false;
@@ -77,20 +70,20 @@ class MvpRules {
   }
 
   static bool _isValidEvidenceHost(String host) {
-    final domain = host.endsWith('.')
-        ? host.substring(0, host.length - 1)
-        : host;
+    final domain =
+        (host.endsWith('.') ? host.substring(0, host.length - 1) : host)
+            .toLowerCase();
     if (domain.isEmpty || domain.length > 253) return false;
+    if (domain == 'localhost' ||
+        domain.endsWith('.localhost') ||
+        domain.endsWith('.local')) {
+      return false;
+    }
     final labels = domain.split('.');
-    if (RegExp(r'^[0-9.]+$').hasMatch(domain)) {
-      return labels.length == 4 &&
-          labels.every((label) {
-            final octet = int.tryParse(label);
-            return octet != null &&
-                octet >= 0 &&
-                octet <= 255 &&
-                (label.length == 1 || !label.startsWith('0'));
-          });
+    // WHATWG URL parsing on the server treats numeric final labels as IPv4,
+    // including shortened, integer, octal and hexadecimal address forms.
+    if (RegExp(r'^(?:[0-9]+|0x[0-9a-f]*)$').hasMatch(labels.last)) {
+      return false;
     }
     return labels.every(
       (label) => RegExp(

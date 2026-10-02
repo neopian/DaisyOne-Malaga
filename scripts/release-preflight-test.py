@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Focused failure-gate tests; uses synthetic configuration, no service calls."""
 import importlib.util
+import hashlib
 import json
 import plistlib
 import tempfile
@@ -54,6 +55,15 @@ class ReleasePreflightTests(unittest.TestCase):
                          'backend_mail_sender', 'backend_account_url',
                          'backend_verification_policy'} <= blocked)
 
+    def test_repository_preserves_approved_native_source_baseline(self):
+        # The aggregate runner allows unrelated release gates to remain blocked.
+        # These adopted native gates must therefore fail their own regression test.
+        report = preflight.check_release(preflight.ROOT, {})
+        checks = {check['id']: check['status'] for check in report['checks']}
+        for key in ('ios_minimum', 'ios_scene_lifecycle', 'podfile_lock', 'pod_lock_packages'):
+            with self.subTest(key=key):
+                self.assertEqual(checks[key], 'CHECKED')
+
     def test_rejects_ats_and_background_permissions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -102,6 +112,140 @@ class ReleasePreflightTests(unittest.TestCase):
             report = preflight.check_release(root, {})
             checks = {c['id']: c['status'] for c in report['checks']}
             self.assertEqual(checks['app_privacy_collection_review'], 'BLOCKED')
+
+
+class IosBaselineTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        for directory in ('ios/Runner', 'ios/Runner.xcodeproj', 'ios/Flutter'):
+            (self.root / directory).mkdir(parents=True, exist_ok=True)
+        self.project = self.root / 'ios/Runner.xcodeproj/project.pbxproj'
+        self.project.write_text('IPHONEOS_DEPLOYMENT_TARGET = 15.0;\n' * 3)
+        self.podfile = self.root / 'ios/Podfile'
+        self.podfile.write_text("platform :ios, '15.0'\n")
+        self.framework = self.root / 'ios/Flutter/AppFrameworkInfo.plist'
+        self.framework.write_bytes(plistlib.dumps({'CFBundleExecutable': 'App'}))
+        self.info = {'UIApplicationSceneManifest': {
+            'UIApplicationSupportsMultipleScenes': False,
+            'UISceneConfigurations': {'UIWindowSceneSessionRoleApplication': [{
+                'UISceneClassName': 'UIWindowScene',
+                'UISceneConfigurationName': 'flutter',
+                'UISceneDelegateClassName': 'FlutterSceneDelegate',
+                'UISceneStoryboardFile': 'Main',
+            }]},
+        }}
+        self.save_info()
+        self.delegate = self.root / 'ios/Runner/AppDelegate.swift'
+        self.delegate.write_text('''import Flutter
+import UIKit
+@main
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
+  override func application(
+    _ application: UIApplication,
+    didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
+  ) -> Bool {
+    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+  }
+}
+''')
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def save_info(self):
+        (self.root / 'ios/Runner/Info.plist').write_bytes(plistlib.dumps(self.info))
+
+    def status(self, key):
+        report = preflight.check_release(self.root, {})
+        return next(check['status'] for check in report['checks'] if check['id'] == key)
+
+    def test_approved_floor_accepts_sdk_generated_framework_minimum(self):
+        self.assertEqual(self.status('ios_minimum'), 'CHECKED')
+        self.assertEqual(self.status('ios_scene_lifecycle'), 'CHECKED')
+
+    def test_rejects_reverted_mixed_raised_or_invalid_project_targets(self):
+        for targets in (['13.0'] * 3, ['14.0'] * 3,
+                        ['15.0', '13.0', '15.0'], ['15.0', '16.0', '15.0'],
+                        ['16.0'] * 3, ['15.0'] * 2, ['15.0', '15.0', '15..0'], []):
+            with self.subTest(targets=targets):
+                self.project.write_text(''.join(f'IPHONEOS_DEPLOYMENT_TARGET = {value};\n'
+                                               for value in targets))
+                self.assertEqual(self.status('ios_minimum'), 'BLOCKED')
+
+    def test_rejects_podfile_target_drift_or_missing_platform(self):
+        for value in ("platform :ios, '13.0'\n", "platform :ios, '14.0'\n",
+                      "platform :ios, '16.0'\n", "# platform :ios, '15.0'\n", '',
+                      "platform :ios, '15.0'\nplatform :ios, '13.0'\n"):
+            with self.subTest(value=value):
+                self.podfile.write_text(value)
+                self.assertEqual(self.status('ios_minimum'), 'BLOCKED')
+
+    def test_source_framework_minimum_must_be_generated_not_reintroduced(self):
+        for value in ('13.0', '14.0', '15.0', '16.0'):
+            with self.subTest(value=value):
+                self.framework.write_bytes(plistlib.dumps({
+                    'CFBundleExecutable': 'App', 'MinimumOSVersion': value}))
+                self.assertEqual(self.status('ios_minimum'), 'BLOCKED')
+
+    def test_missing_or_malformed_framework_is_not_treated_as_generated_style(self):
+        for content in (b'not a plist', plistlib.dumps([]), plistlib.dumps({})):
+            with self.subTest(content=content):
+                self.framework.write_bytes(content)
+                self.assertEqual(self.status('ios_minimum'), 'BLOCKED')
+        self.framework.unlink()
+        self.assertEqual(self.status('ios_minimum'), 'BLOCKED')
+
+    def test_scene_lifecycle_rejects_missing_or_multiple_scenes(self):
+        for value in (None, {}, {'UIApplicationSupportsMultipleScenes': True},
+                      {'UIApplicationSupportsMultipleScenes': False, 'UISceneConfigurations': {}}):
+            with self.subTest(value=value):
+                self.info['UIApplicationSceneManifest'] = value
+                if value is None:
+                    del self.info['UIApplicationSceneManifest']
+                self.save_info()
+                self.assertEqual(self.status('ios_scene_lifecycle'), 'BLOCKED')
+
+    def test_scene_lifecycle_rejects_wrong_delegate_storyboard_or_multiwindow(self):
+        original = plistlib.dumps(self.info)
+        for key, value in (('UISceneDelegateClassName', 'UnreviewedSceneDelegate'),
+                           ('UISceneStoryboardFile', 'Missing')):
+            with self.subTest(key=key):
+                self.info = plistlib.loads(original)
+                scene = self.info['UIApplicationSceneManifest']['UISceneConfigurations']['UIWindowSceneSessionRoleApplication'][0]
+                scene[key] = value
+                self.save_info()
+                self.assertEqual(self.status('ios_scene_lifecycle'), 'BLOCKED')
+        for value in (True, 0):
+            self.info = plistlib.loads(original)
+            self.info['UIApplicationSceneManifest']['UIApplicationSupportsMultipleScenes'] = value
+            self.save_info()
+            self.assertEqual(self.status('ios_scene_lifecycle'), 'BLOCKED')
+
+    def test_scene_lifecycle_rejects_old_missing_or_duplicate_plugin_registration(self):
+        original = self.delegate.read_text()
+        for value in (original.replace(', FlutterImplicitEngineDelegate', ''),
+                      original.replace('engineBridge.pluginRegistry', 'self'),
+                      original.replace('GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)', ''),
+                      original.replace('didInitializeImplicitFlutterEngine', 'wrongCallback'),
+                      original + '\nGeneratedPluginRegistrant.register(with: self)\n'):
+            with self.subTest(value=value):
+                self.delegate.write_text(value)
+                self.assertEqual(self.status('ios_scene_lifecycle'), 'BLOCKED')
+
+    def test_comment_only_podfile_change_requires_updated_checksum(self):
+        lock = self.root / 'ios/Podfile.lock'
+        original_checksum = hashlib.sha1(self.podfile.read_bytes()).hexdigest()
+        lock.write_text(f'PODFILE CHECKSUM: {original_checksum}\n')
+        self.assertEqual(self.status('podfile_lock'), 'CHECKED')
+        self.podfile.write_text('# Approved iOS 15 baseline\n' + self.podfile.read_text())
+        self.assertEqual(self.status('podfile_lock'), 'BLOCKED')
+        updated_checksum = hashlib.sha1(self.podfile.read_bytes()).hexdigest()
+        lock.write_text(f'PODFILE CHECKSUM: {updated_checksum}\n')
+        self.assertEqual(self.status('podfile_lock'), 'CHECKED')
 
 
 if __name__ == '__main__':

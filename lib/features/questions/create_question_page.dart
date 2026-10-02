@@ -15,6 +15,7 @@ import '../../core/services/mvp_rules.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/widgets/app_page.dart';
 import '../../shared/models/question.dart';
+import '../activity/activity_repository.dart';
 import '../auth/auth_repository.dart';
 import '../profile/profile_repository.dart';
 import 'question_repository.dart';
@@ -731,8 +732,8 @@ class _CreateQuestionPageState extends ConsumerState<CreateQuestionPage>
                         FilledButton(
                           onPressed: () => setState(() {
                             _recoveryQuestions = ref
-                                .read(questionRepositoryProvider)
-                                .fetchVisibleQuestions();
+                                .read(activityRepositoryProvider)
+                                .fetchRecentOwnQuestions();
                           }),
                           child: Text(
                             _recoveryQuestions == null

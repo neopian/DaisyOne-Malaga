@@ -10,6 +10,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:local_qa_concierge/app/theme.dart';
 import 'package:local_qa_concierge/core/services/api_service.dart';
 import 'package:local_qa_concierge/core/services/location_service.dart';
+import 'package:local_qa_concierge/features/activity/activity_repository.dart';
 import 'package:local_qa_concierge/features/auth/auth_repository.dart';
 import 'package:local_qa_concierge/features/profile/profile_repository.dart';
 import 'package:local_qa_concierge/features/questions/create_question_page.dart';
@@ -62,9 +63,9 @@ class _Questions extends QuestionRepository {
   _Questions(super.client);
   final calls = <Map<String, Object?>>[];
   Future<String> Function()? createResult;
-  List<Question> visible = [];
   @override
-  Future<List<Question>> fetchVisibleQuestions() async => visible;
+  Future<List<Question>> fetchVisibleQuestions() async =>
+      throw StateError('Submission recovery must not use the public feed');
   @override
   Future<String> createQuestion({
     required String title,
@@ -98,6 +99,18 @@ class _Questions extends QuestionRepository {
   }
 }
 
+class _Activity extends ActivityRepository {
+  _Activity(super.client);
+  List<Question> recent = [];
+  int calls = 0;
+
+  @override
+  Future<List<Question>> fetchRecentOwnQuestions() async {
+    calls++;
+    return recent;
+  }
+}
+
 class _WriteFailingStore extends TravelDraftStore {
   _WriteFailingStore() : super(server: 'test-server');
   @override
@@ -119,6 +132,7 @@ class _Harness {
     );
     auth = _TestAuth(api);
     questions = _Questions(api);
+    activity = _Activity(api);
     router = GoRouter(
       initialLocation: '/questions/new',
       routes: [
@@ -141,6 +155,7 @@ class _Harness {
   late final ApiClient api;
   late final _TestAuth auth;
   late final _Questions questions;
+  late final _Activity activity;
   late final GoRouter router;
   final TravelDraftStore store;
   final Future<DeviceLocation> Function() location;
@@ -153,6 +168,7 @@ class _Harness {
           authRepositoryProvider.overrideWithValue(auth),
           currentProfileProvider.overrideWith((ref) async => auth.currentUser!),
           questionRepositoryProvider.overrideWithValue(questions),
+          activityRepositoryProvider.overrideWithValue(activity),
           questionLocationLoaderProvider.overrideWithValue(location),
           travelDraftStoreProvider.overrideWithValue(store),
         ],
@@ -541,6 +557,7 @@ void main() {
       expect(find.textContaining('사진 2장'), findsOneWidget);
       await _tap(tester, find.text('내 질문에서 등록 여부 확인'));
       expect(find.text('최근 내 질문'), findsOneWidget);
+      expect(h.activity.calls, 1);
       expect(find.textContaining('등록 실패가 확정되는 것은 아닙니다'), findsOneWidget);
       expect((await store.read(_owner.id))?.submissionPending, isTrue);
     },
@@ -558,7 +575,7 @@ void main() {
         }),
       );
       final h = _Harness(store: store)..cleanup(tester);
-      h.questions.visible = [
+      h.activity.recent = [
         Question.fromMap({
           'id': 'my-malaga-question',
           'user_id': _owner.id,
@@ -727,7 +744,7 @@ void main() {
     );
     final h = _Harness(store: store)..cleanup(tester);
     const title = '말라가 공항에서 늦은 밤 시내까지 이동할 방법이 궁금해요';
-    h.questions.visible = [
+    h.activity.recent = [
       Question.fromMap({
         'id': 'recovered-question',
         'user_id': _owner.id,

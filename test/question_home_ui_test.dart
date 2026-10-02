@@ -83,11 +83,16 @@ Future<void> _home(
         path: '/helper/home',
         builder: (_, _) => const Scaffold(body: Text('답변자 화면')),
       ),
+      GoRoute(
+        path: '/activity/traveler',
+        builder: (_, _) => const Scaffold(body: Text('내 질문 활동 화면')),
+      ),
     ],
   );
   addTearDown(router.dispose);
   await tester.pumpWidget(
     ProviderScope(
+      retry: (_, _) => null,
       overrides: [
         questionRealtimeProvider.overrideWith((ref) {}),
         questionsProvider.overrideWith(
@@ -120,6 +125,63 @@ Future<void> _home(
 }
 
 void main() {
+  testWidgets('failed feed stays explicit in expanded sheet and retries', (
+    tester,
+  ) async {
+    var calls = 0;
+    await _home(
+      tester,
+      questions: () async {
+        if (++calls == 1) throw StateError('synthetic offline');
+        return [_question()];
+      },
+    );
+    await tester.tap(find.byTooltip('질문 목록 펼치기 또는 접기'));
+    await tester.pumpAndSettle();
+    expect(find.text('질문을 불러오지 못했어요'), findsOneWidget);
+    expect(find.text('현재 지도에서 0개'), findsNothing);
+    expect(find.text('아직 질문이 없어요'), findsNothing);
+    await tester.tap(find.text('질문 다시 불러오기'));
+    await tester.pumpAndSettle();
+    expect(calls, 2);
+    expect(find.text('마드리드 공항에서 시내로 가는 방법'), findsOneWidget);
+    expect(find.text('질문을 불러오지 못했어요'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'failed refresh does not present previously visible private data',
+    (tester) async {
+      var calls = 0;
+      await _home(
+        tester,
+        questions: () async {
+          if (++calls > 1) throw StateError('synthetic revoked access');
+          return [_question()];
+        },
+      );
+      final container = ProviderScope.containerOf(
+        tester.element(find.byType(QuestionHomePage)),
+      );
+      container.invalidate(questionsProvider);
+      await tester.pumpAndSettle();
+      expect(find.text('질문을 불러오지 못했어요'), findsOneWidget);
+      expect(find.text('마드리드 공항에서 시내로 가는 방법'), findsNothing);
+      expect(find.text('현재 지도에서 0개'), findsNothing);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('personal questions stay reachable while map feed fails', (
+    tester,
+  ) async {
+    await _home(tester, questions: () async => throw StateError('offline'));
+    await tester.tap(find.byTooltip('내 질문'));
+    await tester.pumpAndSettle();
+    expect(find.text('내 질문 활동 화면'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets(
     'offline map can jump to a US city through local search at double text',
     (tester) async {

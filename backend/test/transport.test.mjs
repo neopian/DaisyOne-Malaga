@@ -39,6 +39,22 @@ test('encoding negotiation honors quality, exclusions, wildcard, identity, absen
    const r=await raw(base,'/api/questions',{headers:{'accept-encoding':value}});assert.equal(r.status,200,value);assert.equal(r.headers['content-encoding'],'gzip',value);assert.deepEqual(gunzipSync(r.body),payload,value);
   }
   for(const value of ['gzip;q=0, identity;q=0','br, *;q=0']){const r=await raw(base,'/api/questions',{headers:{'accept-encoding':value}});assert.equal(r.status,406);assert.equal(JSON.parse(r.body).error.code,'NOT_ACCEPTABLE');assert.equal(r.headers['cache-control'],'no-store');}
+});
+});
+
+test('compact personal, discovery and operator pages use negotiated gzip without compressing denied responses',async()=>{
+ const page=Buffer.from(JSON.stringify({items:Array.from({length:20},(_,i)=>({id:`synthetic-${i}`,title:`공항 이동 질문 ${i}`,status:'assigned',country:'France',city:'Paris',reward_points:100})),next_cursor:'synthetic-opaque-cursor'}));
+ await withServer(request=>new URL(request.url).searchParams.has('denied')?
+  response(Buffer.from('{"error":{"code":"ADMIN_REQUIRED"}}'),{status:403}):response(page),async base=>{
+  for(const path of ['/api/activity/questions?role=traveler','/api/guide/discovery?cursor=synthetic','/api/admin/operations/questions?status=assigned']){
+   const plain=await raw(base,path),compressed=await raw(base,path,{headers:{'accept-encoding':'gzip'}});
+   assert.equal(compressed.headers['content-encoding'],'gzip');
+   assert.equal(compressed.headers['cache-control'],'no-store');
+   assert.deepEqual(gunzipSync(compressed.body),plain.body);
+   assert.ok(compressed.body.length<plain.body.length);
+   const denied=await raw(base,`${path}&denied=true`,{headers:{'accept-encoding':'gzip'}});
+   assert.equal(denied.status,403);assert.equal(denied.headers['content-encoding'],undefined);
+  }
  });
 });
 

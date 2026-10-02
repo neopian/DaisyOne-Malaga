@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import unquote, urljoin, urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
+IOS_MINIMUM = '15.0'
 TEMPLATE_ICON_SHA256 = '7770183009e914112de7d8ef1d235a6a30c5834424858e0d2f8253f6b8d31926'
 FLAGS = ('DEMO_MODE', 'ENABLE_DEV_LOGIN', 'QA_AUTO_LOGIN')
 MANUAL = [
@@ -127,7 +128,8 @@ def check_release(root, config):
     def plist(path):
         try:
             with (root / path).open('rb') as stream:
-                return plistlib.load(stream)
+                value = plistlib.load(stream)
+                return value if isinstance(value, dict) else {}
         except (OSError, plistlib.InvalidFileException, ValueError):
             return {}
 
@@ -164,9 +166,38 @@ def check_release(root, config):
     ats = info.get('NSAppTransportSecurity', {})
     check('ats', not ats,
           'No ATS override; any future exception needs a specific transport/security review, never a blanket allowance.')
-    floors = re.findall(r'IPHONEOS_DEPLOYMENT_TARGET = ([\d.]+);', project)
-    check('ios_minimum', bool(floors and all(float(x) >= 13 for x in floors) and "platform :ios, '13.0'" in podfile and plist('ios/Flutter/AppFrameworkInfo.plist').get('MinimumOSVersion') == '13.0'),
-          'Runner, Podfile and Flutter framework minimum OS are aligned at iOS 13; this is not the build SDK version.')
+    floors = re.findall(r'^\s*IPHONEOS_DEPLOYMENT_TARGET\s*=\s*([^;]+);', project, re.M)
+    pod_floors = re.findall(r"^\s*platform\s+:ios,\s*['\"]([^'\"\n]+)['\"]", podfile, re.M)
+    framework = plist('ios/Flutter/AppFrameworkInfo.plist')
+    check('ios_minimum', bool(len(floors) >= 3
+          and all(value.strip().strip('"') == IOS_MINIMUM for value in floors)
+          and pod_floors == [IOS_MINIMUM]
+          and framework.get('CFBundleExecutable') == 'App'
+          and 'MinimumOSVersion' not in framework),
+          'Debug/Profile/Release project targets and Podfile must use the approved iOS 15.0 floor. Flutter 3.47.5 generates the App framework minimum during the build; the valid source AppFrameworkInfo.plist must omit MinimumOSVersion. Built framework compatibility remains a native check.')
+    scene_manifest = {
+        'UIApplicationSupportsMultipleScenes': False,
+        'UISceneConfigurations': {
+            'UIWindowSceneSessionRoleApplication': [{
+                'UISceneClassName': 'UIWindowScene',
+                'UISceneConfigurationName': 'flutter',
+                'UISceneDelegateClassName': 'FlutterSceneDelegate',
+                'UISceneStoryboardFile': 'Main',
+            }],
+        },
+    }
+    delegate = read('ios/Runner/AppDelegate.swift')
+    implicit_engine_registration = re.search(
+        r'func\s+didInitializeImplicitFlutterEngine\(\s*_\s+engineBridge:\s*FlutterImplicitEngineBridge\s*\)\s*\{\s*'
+        r'GeneratedPluginRegistrant\.register\(with:\s*engineBridge\.pluginRegistry\)\s*\}', delegate)
+    actual_scene = info.get('UIApplicationSceneManifest')
+    check('ios_scene_lifecycle', bool(isinstance(actual_scene, dict)
+          and actual_scene.get('UIApplicationSupportsMultipleScenes') is False
+          and actual_scene == scene_manifest
+          and re.search(r'class\s+AppDelegate\s*:\s*FlutterAppDelegate\s*,\s*FlutterImplicitEngineDelegate\s*\{', delegate)
+          and implicit_engine_registration
+          and len(re.findall(r'GeneratedPluginRegistrant\.register\s*\(', delegate)) == 1),
+          'The approved single Flutter scene and implicit-engine plugin registration are present. Source checks do not validate cold launch, background/resume, picker/share return or secure-session behavior on iOS.')
     entitlements = [plist('ios/Runner/' + n + '.entitlements') for n in ('DebugProfile', 'Release')]
     check('keychain_entitlements', all(e.get('keychain-access-groups') == [] for e in entitlements) and project.count('CODE_SIGN_ENTITLEMENTS = Runner/DebugProfile.entitlements;') == 2 and project.count('CODE_SIGN_ENTITLEMENTS = Runner/Release.entitlements;') == 1,
           'Default app Keychain entitlements wired for all configurations; archive/device verification is still required.')
@@ -201,7 +232,7 @@ def check_release(root, config):
 
     checksum = re.search(r'^PODFILE CHECKSUM: (\w+)$', podlock, re.M)
     check('podfile_lock', bool(checksum and hashlib.sha1(podfile.encode()).hexdigest() == checksum.group(1)),
-          'Run flutter pub get and pod install on macOS and commit the generated Podfile.lock; do not fabricate native resolution on Linux.')
+          'Podfile SHA-1 must match the recorded CocoaPods input checksum. This static match does not reproduce native resolution; dependency graph changes require reviewed macOS CocoaPods resolution.')
     pod_names = set(re.findall(r'^  - (\w+) \(from ', podlock, re.M)) - {'Flutter'}
     stale = sorted(pod_names - packages.keys())
     check('pod_lock_packages', not stale, 'CocoaPods entries absent from Dart lockfile: ' + (', '.join(stale) if stale else 'none') + '. Pod versions need not equal Dart versions.')

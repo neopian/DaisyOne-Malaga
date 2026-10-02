@@ -4,9 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../shared/widgets/app_page.dart';
 import '../../shared/widgets/guide_activity_card.dart';
-import '../questions/question_home_page.dart';
+import '../guide_discovery/guide_discovery_feed.dart';
+import '../guide_discovery/guide_discovery_section.dart';
 import '../questions/question_realtime.dart';
-import '../questions/question_repository.dart';
 import 'helper_repository.dart';
 
 class HelperHomePage extends ConsumerWidget {
@@ -15,7 +15,7 @@ class HelperHomePage extends ConsumerWidget {
   Future<void> _refresh(WidgetRef ref) async {
     ref.invalidate(guideSummaryProvider);
     ref.invalidate(helperApplicationProvider);
-    ref.invalidate(helperOpenQuestionsProvider);
+    ref.invalidate(guideDiscoveryRefreshProvider);
     // Let each independent section retain its own retry/error state.
     await Future.wait([
       ref
@@ -58,6 +58,16 @@ class HelperHomePage extends ConsumerWidget {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 40),
               children: [
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.assignment_outlined),
+                    title: const Text('맡은 질문'),
+                    subtitle: const Text('수락한 질문 · 답변 이어가기 · 채택 결과'),
+                    trailing: const Icon(Icons.chevron_right_rounded),
+                    onTap: () => context.go('/activity/guide'),
+                  ),
+                ),
+                const SizedBox(height: 20),
                 Text('내 활동 지역의 질문', style: theme.textTheme.headlineSmall),
                 const SizedBox(height: 8),
                 Text(
@@ -98,7 +108,10 @@ class HelperHomePage extends ConsumerWidget {
                         onPressed: () => context.go('/helper/waiting'),
                       );
                     }
-                    return const _OpenQuestions();
+                    // Keep page memory alive even when this section scrolls
+                    // beyond the ListView's cache into the activity summary.
+                    ref.watch(guideDiscoveryFeedProvider);
+                    return const GuideDiscoverySection();
                   },
                 ),
                 const SizedBox(height: 24),
@@ -115,62 +128,6 @@ class HelperHomePage extends ConsumerWidget {
       ),
     );
   }
-}
-
-class _OpenQuestions extends ConsumerWidget {
-  const _OpenQuestions();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) => ref
-      .watch(helperOpenQuestionsProvider)
-      .when(
-        loading: () => const _LoadingSection(label: '지역의 질문을 불러오고 있어요'),
-        error: (_, _) => _RetryCard(
-          title: '질문을 불러오지 못했어요',
-          onRetry: () => ref.invalidate(helperOpenQuestionsProvider),
-        ),
-        data: (items) => items.isEmpty
-            ? Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Icon(
-                        Icons.chat_bubble_outline_rounded,
-                        size: 28,
-                        color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      ),
-                      const SizedBox(height: 18),
-                      Text(
-                        '지금 수락 가능한 질문이 없어요',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        '새 질문이 올라오면 여기에서 확인할 수 있어요.',
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextButton.icon(
-                        onPressed: () =>
-                            ref.invalidate(helperOpenQuestionsProvider),
-                        icon: const Icon(Icons.refresh_rounded, size: 18),
-                        label: const Text('질문 다시 확인'),
-                      ),
-                    ],
-                  ),
-                ),
-              )
-            : Column(
-                children: [
-                  for (final question in items)
-                    QuestionCard(question: question),
-                ],
-              ),
-      );
 }
 
 class _LoadingSection extends StatelessWidget {

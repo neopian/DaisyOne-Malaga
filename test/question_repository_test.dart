@@ -74,6 +74,95 @@ void main() {
     );
   }
 
+  for (final failRead in [false, true]) {
+    test(
+      'unreadable photo ${failRead ? 'bytes' : 'length'} is a definite local failure with no point-hold request',
+      () async {
+        var sent = 0;
+        final api =
+            ApiClient(
+                baseUrl: 'https://example.test/api',
+                client: MockClient((_) async {
+                  sent++;
+                  return http.Response('{"id":"unexpected"}', 201);
+                }),
+              )
+              ..token = 'session'
+              ..userId = 'owner';
+        addTearDown(api.dispose);
+        final good = XFile.fromData(
+          Uint8List.fromList([137, 80, 78, 71]),
+          name: 'good.png',
+          path: 'good.png',
+          mimeType: 'image/png',
+        );
+        await expectLater(
+          create(
+            QuestionRepository(api),
+            images: [
+              good,
+              _UnreadableImage(failRead: failRead),
+            ],
+          ),
+          throwsA(
+            isA<ApiException>()
+                .having((e) => e.code, 'code', 'invalid_image')
+                .having((e) => e.status, 'status', isNull)
+                .having((e) => e.toString(), 'message', contains('다시 선택'))
+                .having(
+                  (e) => e.toString(),
+                  'private path redaction',
+                  isNot(contains('private-photo-path')),
+                ),
+          ),
+        );
+        expect(sent, 0);
+      },
+    );
+  }
+
+  test(
+    'transport failure after photo reading stays an unknown request outcome',
+    () async {
+      var sent = 0;
+      final api =
+          ApiClient(
+              baseUrl: 'https://example.test/api',
+              client: MockClient((_) async {
+                sent++;
+                throw const ApiException(
+                  'response lost after request',
+                  code: 'timeout',
+                );
+              }),
+            )
+            ..token = 'session'
+            ..userId = 'owner';
+      addTearDown(api.dispose);
+      await expectLater(
+        create(
+          QuestionRepository(api),
+          images: [
+            XFile.fromData(
+              Uint8List(4),
+              name: 'good.png',
+              path: 'good.png',
+              mimeType: 'image/png',
+            ),
+          ],
+        ),
+        throwsA(
+          isA<ApiException>().having(
+            (e) => e.code,
+            'code',
+            isNot('invalid_image'),
+          ),
+        ),
+      );
+      expect(sent, 1);
+    },
+  );
+
   test(
     'guide feed uses server eligibility endpoint rather than all open questions',
     () async {
@@ -256,4 +345,19 @@ class _DelayedImage extends XFile {
     }
     return Uint8List.fromList([137, 80, 78, 71]);
   }
+}
+
+class _UnreadableImage extends XFile {
+  _UnreadableImage({required this.failRead})
+    : super('private-photo-path.png', mimeType: 'image/png');
+  final bool failRead;
+  @override
+  Future<int> length() async {
+    if (!failRead) throw StateError('Cannot stat private-photo-path.png');
+    return 4;
+  }
+
+  @override
+  Future<Uint8List> readAsBytes() async =>
+      throw StateError('Cannot read private-photo-path.png');
 }

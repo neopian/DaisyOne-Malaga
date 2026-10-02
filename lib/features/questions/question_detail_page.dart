@@ -3,9 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/services/mvp_rules.dart';
+import '../../core/services/api_service.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/models/answer.dart';
 import '../../shared/models/evidence_link.dart';
@@ -16,20 +18,112 @@ import '../../shared/widgets/async_value_view.dart';
 import '../../shared/widgets/status_chip.dart';
 import '../../shared/widgets/guide_activity_card.dart';
 import '../answers/answer_repository.dart';
+import '../auth/auth_repository.dart';
 import '../helper_application/helper_repository.dart';
 import '../profile/profile_repository.dart';
 import '../safety/safety_menu.dart';
 import 'question_realtime.dart';
 import 'question_repository.dart';
 
-class QuestionDetailPage extends ConsumerWidget {
+class QuestionDetailPage extends ConsumerStatefulWidget {
   const QuestionDetailPage({super.key, required this.questionId});
 
   final String questionId;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<QuestionDetailPage> createState() => _QuestionDetailPageState();
+}
+
+class _QuestionDetailPageState extends ConsumerState<QuestionDetailPage> {
+  // Keep only the user's unsent text above the refresh/error view. No question
+  // data is cached here, and a failed poll never recreates an empty controller.
+  final _comment = TextEditingController();
+  late final AuthRepository _auth;
+  String? _commentOwnerId;
+  int _commentRevision = 0;
+  bool _isCommentSubmitting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _auth = ref.read(authRepositoryProvider);
+    _commentOwnerId = _auth.currentUser?.id;
+    _auth.addListener(_handleAccountChange);
+  }
+
+  void _resetComment() {
+    _commentRevision++;
+    _comment.clear();
+    _isCommentSubmitting = false;
+  }
+
+  void _handleAccountChange() {
+    final owner = _auth.currentUser?.id;
+    if (!mounted || owner == _commentOwnerId) return;
+    setState(() {
+      _commentOwnerId = owner;
+      _resetComment();
+    });
+  }
+
+  @override
+  void didUpdateWidget(covariant QuestionDetailPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.questionId != widget.questionId) _resetComment();
+  }
+
+  @override
+  void dispose() {
+    _auth.removeListener(_handleAccountChange);
+    _comment.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submitComment() async {
+    if (_isCommentSubmitting || _commentOwnerId == null) return;
+    final body = _comment.text.trim();
+    final messenger = ScaffoldMessenger.of(context);
+    if (body.isEmpty) {
+      messenger.showSnackBar(const SnackBar(content: Text('코멘트를 입력해 주세요.')));
+      return;
+    }
+    final revision = _commentRevision;
+    final questionId = widget.questionId;
+    setState(() => _isCommentSubmitting = true);
+    try {
+      await ref
+          .read(questionRepositoryProvider)
+          .addComment(questionId: questionId, body: body);
+      if (!mounted || revision != _commentRevision) return;
+      // The editor may currently be hidden by a failed refresh. Clear the
+      // acknowledged draft here so reconnection cannot offer it as a new post.
+      _comment.clear();
+      ref.invalidate(questionProvider(questionId));
+      ref.invalidate(questionsProvider);
+      ref.invalidate(helperOpenQuestionsProvider);
+      messenger.showSnackBar(const SnackBar(content: Text('코멘트를 남겼습니다.')));
+    } catch (error) {
+      if (!mounted || revision != _commentRevision) return;
+      messenger.showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted && revision == _commentRevision) {
+        setState(() => _isCommentSubmitting = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     ref.watch(questionRealtimeProvider);
+    final questionId = widget.questionId;
+    ref.listen(questionProvider(questionId), (_, next) {
+      final error = next.error;
+      if (error is ApiException &&
+          const [401, 403, 404].contains(error.status) &&
+          (_comment.text.isNotEmpty || _isCommentSubmitting)) {
+        setState(_resetComment);
+      }
+    });
     final question = ref.watch(questionProvider(questionId));
     return AppPage(
       maxWidth: 760,
@@ -45,19 +139,46 @@ class QuestionDetailPage extends ConsumerWidget {
           icon: const Icon(Icons.refresh),
         ),
       ],
-      body: AsyncValueView(
-        value: question,
-        onRetry: () => ref.invalidate(questionProvider(questionId)),
-        data: (data) => _QuestionDetail(question: data),
+      body: Column(
+        children: [
+          if (question.hasError && _comment.text.isNotEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(24, 16, 24, 0),
+              child: Text(
+                '입력한 코멘트는 이 화면에 남아 있어요. 연결 후 다시 시도해주세요.',
+                textAlign: TextAlign.center,
+              ),
+            ),
+          Expanded(
+            child: AsyncValueView(
+              value: question,
+              onRetry: () => ref.invalidate(questionProvider(questionId)),
+              data: (data) => _QuestionDetail(
+                question: data,
+                commentController: _comment,
+                isCommentSubmitting: _isCommentSubmitting,
+                onSubmitComment: _submitComment,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 }
 
 class _QuestionDetail extends ConsumerWidget {
-  const _QuestionDetail({required this.question});
+  const _QuestionDetail({
+    required this.question,
+    required this.commentController,
+    required this.isCommentSubmitting,
+    required this.onSubmitComment,
+  });
 
   final Question question;
+  final TextEditingController commentController;
+  final bool isCommentSubmitting;
+  final VoidCallback onSubmitComment;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -168,10 +289,25 @@ class _QuestionDetail extends ConsumerWidget {
             ),
           ),
         ],
+        if ((isOwner || isAssignedHelper) &&
+            profile?.isSuspended != true &&
+            (question.isAssigned || question.isAnswered))
+          TextButton(
+            onPressed: () => context.push(
+              Uri(
+                path: '/account/exchange-issues',
+                queryParameters: {'question': question.id},
+              ).toString(),
+            ),
+            child: const Text('이 진행의 문제 기록'),
+          ),
         const SizedBox(height: 12),
         _QuestionCommentsSection(
           question: question,
           currentUserId: profile?.id,
+          commentController: commentController,
+          isCommentSubmitting: isCommentSubmitting,
+          onSubmitComment: onSubmitComment,
         ),
         const SizedBox(height: 12),
         if (canAcceptQuestion) ...[
@@ -359,10 +495,16 @@ class _QuestionCommentsSection extends StatelessWidget {
   const _QuestionCommentsSection({
     required this.question,
     required this.currentUserId,
+    required this.commentController,
+    required this.isCommentSubmitting,
+    required this.onSubmitComment,
   });
 
   final Question question;
   final String? currentUserId;
+  final TextEditingController commentController;
+  final bool isCommentSubmitting;
+  final VoidCallback onSubmitComment;
 
   @override
   Widget build(BuildContext context) {
@@ -397,7 +539,11 @@ class _QuestionCommentsSection extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 12),
-            _CommentComposer(questionId: question.id),
+            _CommentComposer(
+              controller: commentController,
+              isSubmitting: isCommentSubmitting,
+              onSubmit: onSubmitComment,
+            ),
             if (comments.isEmpty) ...[
               const SizedBox(height: 14),
               Text(
@@ -423,24 +569,16 @@ class _QuestionCommentsSection extends StatelessWidget {
   }
 }
 
-class _CommentComposer extends ConsumerStatefulWidget {
-  const _CommentComposer({required this.questionId});
+class _CommentComposer extends StatelessWidget {
+  const _CommentComposer({
+    required this.controller,
+    required this.isSubmitting,
+    required this.onSubmit,
+  });
 
-  final String questionId;
-
-  @override
-  ConsumerState<_CommentComposer> createState() => _CommentComposerState();
-}
-
-class _CommentComposerState extends ConsumerState<_CommentComposer> {
-  final _controller = TextEditingController();
-  bool _isSubmitting = false;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  final TextEditingController controller;
+  final bool isSubmitting;
+  final VoidCallback onSubmit;
 
   @override
   Widget build(BuildContext context) {
@@ -448,8 +586,8 @@ class _CommentComposerState extends ConsumerState<_CommentComposer> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         TextField(
-          controller: _controller,
-          enabled: !_isSubmitting,
+          controller: controller,
+          enabled: !isSubmitting,
           minLines: 2,
           maxLines: 4,
           maxLength: 600,
@@ -463,8 +601,8 @@ class _CommentComposerState extends ConsumerState<_CommentComposer> {
         Align(
           alignment: Alignment.centerRight,
           child: FilledButton.icon(
-            onPressed: _isSubmitting ? null : _submit,
-            icon: _isSubmitting
+            onPressed: isSubmitting ? null : onSubmit,
+            icon: isSubmitting
                 ? const SizedBox.square(
                     dimension: 18,
                     child: CircularProgressIndicator(strokeWidth: 2),
@@ -475,35 +613,6 @@ class _CommentComposerState extends ConsumerState<_CommentComposer> {
         ),
       ],
     );
-  }
-
-  Future<void> _submit() async {
-    final body = _controller.text.trim();
-    final messenger = ScaffoldMessenger.of(context);
-    final container = ProviderScope.containerOf(context, listen: false);
-
-    if (body.isEmpty) {
-      messenger.showSnackBar(const SnackBar(content: Text('코멘트를 입력해 주세요.')));
-      return;
-    }
-
-    setState(() => _isSubmitting = true);
-    try {
-      await ref
-          .read(questionRepositoryProvider)
-          .addComment(questionId: widget.questionId, body: body);
-      if (mounted) _controller.clear();
-      container.invalidate(questionProvider(widget.questionId));
-      container.invalidate(questionsProvider);
-      container.invalidate(helperOpenQuestionsProvider);
-      messenger.showSnackBar(const SnackBar(content: Text('코멘트를 남겼습니다.')));
-    } catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text(error.toString())));
-    } finally {
-      if (mounted) {
-        setState(() => _isSubmitting = false);
-      }
-    }
   }
 }
 
@@ -593,16 +702,13 @@ class _AnswerCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 const Icon(Icons.forum_outlined),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    '답변',
-                    style: Theme.of(context).textTheme.titleLarge,
-                  ),
-                ),
+                Text('답변', style: Theme.of(context).textTheme.titleLarge),
                 StatusChip(
                   label: answer.status,
                   emphasis: answer.status == 'accepted',
@@ -614,6 +720,15 @@ class _AnswerCard extends StatelessWidget {
                   authorName: '답변자',
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              answer.createdAt == null
+                  ? '답변 작성 시각 정보 없음'
+                  : '답변 작성 · ${DateFormat('yyyy년 M월 d일 HH:mm:ss').format(answer.createdAt!.toLocal())} (기기 시간 기준)',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 12),
             Text(answer.body),

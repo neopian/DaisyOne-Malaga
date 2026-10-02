@@ -3,11 +3,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/services/location_service.dart';
+import '../../core/services/api_service.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/models/app_user.dart';
 import '../../shared/widgets/app_page.dart';
 import '../../shared/widgets/guide_activity_card.dart';
 import '../helper_application/helper_repository.dart';
+import '../auth/auth_repository.dart';
 import '../questions/question_realtime.dart';
 import 'profile_repository.dart';
 
@@ -19,52 +21,78 @@ class ProfilePage extends ConsumerStatefulWidget {
 }
 
 class _ProfilePageState extends ConsumerState<ProfilePage> {
-  final _country = TextEditingController();
-  final _city = TextEditingController();
+  late final AuthRepository _auth;
+  late final ApiClient _api;
+  String? _locationOwner;
+  String? _locationToken;
+  int _locationRevision = 0;
   bool _isResolvingLocation = false;
-  bool _didSeedProfileLocation = false;
   String? _locationError;
 
   @override
+  void initState() {
+    super.initState();
+    _auth = ref.read(authRepositoryProvider);
+    _api = ref.read(apiClientProvider);
+    _locationOwner = _auth.currentUser?.id;
+    _locationToken = _api.token;
+    _auth.addListener(_onAccountChanged);
+  }
+
+  void _onAccountChanged() {
+    final owner = _auth.currentUser?.id;
+    if (!mounted || (owner == _locationOwner && _api.token == _locationToken)) {
+      return;
+    }
+    setState(() {
+      _locationOwner = owner;
+      _locationToken = _api.token;
+      _locationRevision++;
+      _isResolvingLocation = false;
+      _locationError = null;
+    });
+  }
+
+  @override
   void dispose() {
-    _country.dispose();
-    _city.dispose();
+    _locationRevision++;
+    _auth.removeListener(_onAccountChanged);
     super.dispose();
   }
 
   Future<void> _useCurrentLocation() async {
     if (_isResolvingLocation) return;
+    final owner = _auth.currentUser?.id;
+    final token = _api.token;
+    if (owner == null || token == null) return;
+    final revision = ++_locationRevision;
+    final repository = ref.read(profileRepositoryProvider);
+    bool isCurrent() =>
+        mounted &&
+        revision == _locationRevision &&
+        owner == _auth.currentUser?.id &&
+        token == _api.token;
     setState(() {
       _isResolvingLocation = true;
       _locationError = null;
     });
     try {
       final location = await const LocationService().getCurrentLocation();
-      await ref
-          .read(profileRepositoryProvider)
-          .updateLocation(country: location.country, city: location.city);
-      if (!mounted) return;
-      setState(() {
-        _country.text = location.country;
-        _city.text = location.city;
-      });
+      // A delayed platform lookup must not create a new account's mutation.
+      // Bind before GPS, not merely once the HTTP request eventually starts.
+      if (!isCurrent()) return;
+      await repository.updateLocation(
+        country: location.country,
+        city: location.city,
+      );
+      if (!isCurrent()) return;
       ref.invalidate(currentProfileProvider);
     } catch (error) {
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() => _locationError = _locationMessage(error));
     } finally {
-      if (mounted) setState(() => _isResolvingLocation = false);
+      if (isCurrent()) setState(() => _isResolvingLocation = false);
     }
-  }
-
-  void _seedProfileLocation(AppUser user) {
-    if (_didSeedProfileLocation) return;
-    _didSeedProfileLocation = true;
-    if (_city.text.trim().isNotEmpty) {
-      return;
-    }
-    _country.text = user.currentCountry ?? '';
-    _city.text = user.currentCity ?? '';
   }
 
   String _locationMessage(Object error) {
@@ -148,7 +176,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           ),
         ),
         data: (user) {
-          _seedProfileLocation(user);
           return Align(
             alignment: Alignment.topCenter,
             child: ConstrainedBox(
@@ -184,8 +211,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                     const SizedBox(height: 16),
                     _ProfileLocation(
                       label: [
-                        _country.text.trim(),
-                        _city.text.trim(),
+                        user.currentCountry?.trim() ?? '',
+                        user.currentCity?.trim() ?? '',
                       ].where((part) => part.isNotEmpty).join(' · '),
                       isLoading: _isResolvingLocation,
                       error: _locationError,

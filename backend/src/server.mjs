@@ -53,7 +53,7 @@ function varyEncoding(headers) {
 function compressibleResponse(request,response) {
  const path=new URL(request.url).pathname.replace(/\/$/,'');
  return request.method==='GET'&&response.status===200&&response.body&&
-  (path==='/api/questions'||/^\/api\/questions\/[0-9a-f-]{36}$/i.test(path)||path==='/api/guide/questions'||path==='/api/points')&&
+  (path==='/api/questions'||/^\/api\/questions\/[0-9a-f-]{36}$/i.test(path)||path==='/api/guide/questions'||path==='/api/guide/discovery'||path==='/api/points'||path==='/api/activity/questions'||path==='/api/admin/operations/questions')&&
   /^application\/json(?:\s*;|$)/i.test(response.headers.get('content-type')??'')&&
   !response.headers.has('content-encoding')&&!response.headers.has('content-range')&&
   !/(?:^|,)\s*no-transform\s*(?:,|$)/i.test(response.headers.get('cache-control')??'');

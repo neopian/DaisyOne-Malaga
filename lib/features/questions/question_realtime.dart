@@ -4,8 +4,10 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/auth_repository.dart';
+import '../guide_discovery/guide_discovery_feed.dart';
 import '../helper_application/helper_repository.dart';
 import '../profile/profile_repository.dart';
+import '../activity/activity_feed.dart';
 import 'question_repository.dart';
 
 /// Shared by visible question pages. Stops in background and on disposal.
@@ -13,6 +15,8 @@ final questionRealtimeProvider = Provider.autoDispose<void>((ref) {
   final auth = ref.watch(authRepositoryProvider);
   void refresh() {
     if (auth.currentUser == null) return;
+    ref.invalidate(activityRefreshProvider);
+    ref.invalidate(guideDiscoveryRefreshProvider);
     ref.invalidate(questionsProvider);
     ref.invalidate(helperOpenQuestionsProvider);
     ref.invalidate(questionProvider);

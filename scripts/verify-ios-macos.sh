@@ -9,7 +9,7 @@ Usage: bash scripts/verify-ios-macos.sh [--dry-run]
 Requires preinstalled macOS, licensed/initialized Xcode 26+, iOS 26+ SDK,
 Flutter 3.47.5 with iOS artifacts, CocoaPods 1.16.2, and Python 3.
 The dedicated runner's Flutter configuration must already disable SwiftPM.
-See docs/CLOUD_IOS_BUILD.md, including the known stale Podfile.lock blocker.
+See docs/CLOUD_IOS_BUILD.md for the reviewed iOS 15 baseline and native evidence.
 
 --dry-run prints the plan on any OS; it runs no build or dependency command.
 FLUTTER_BIN may select a preinstalled Flutter executable.
@@ -49,9 +49,11 @@ DRY RUN ONLY: no native validation has run and no files are written.
       -resultBundlePath <fresh-report-directory>/native.xcresult \
       CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= \
       DEVELOPMENT_TEAM= -disableAutomaticPackageResolution build analyze
-12. Inspect fresh Runner.app: built SDK/target, executable, compiled assets,
+12. Summarize the complete Xcode log before any provider tail limit, preserving
+    its exit code and analyzer warnings separately from compilation success.
+13. Inspect fresh Runner.app: built SDK/target, executable, compiled assets,
     Runner/Flutter manifests and all nine expected plugin manifest bundles.
-13. Recheck source/lock hashes. A pass is unsigned build/resource evidence only.
+14. Recheck source/lock hashes. A pass is unsigned build/resource evidence only.
 The .invalid URL is compile-only synthetic configuration, never a live service.
 PLAN
   exit 0
@@ -129,7 +131,8 @@ paths = ['pubspec.yaml', 'pubspec.lock', 'ios/Podfile', 'ios/Podfile.lock',
          'ios/Runner.xcodeproj/project.pbxproj',
          'ios/Runner.xcodeproj/xcshareddata/xcschemes/Runner.xcscheme',
          'ios/Runner.xcworkspace/contents.xcworkspacedata',
-         'ios/Flutter/Debug.xcconfig', 'ios/Flutter/Release.xcconfig']
+         'ios/Flutter/Debug.xcconfig', 'ios/Flutter/Release.xcconfig',
+         'ios/Flutter/AppFrameworkInfo.plist']
 paths += [str(p) for p in pathlib.Path('ios/Runner').rglob('*')
           if p.is_file() and not p.name.startswith('GeneratedPluginRegistrant.')]
 print(json.dumps({p: hashlib.sha256(pathlib.Path(p).read_bytes()).hexdigest()
@@ -168,15 +171,22 @@ run_check ios_configuration "$flutter_bin" build ios --release --no-codesign --c
   --dart-define=DEMO_MODE=false --dart-define=ENABLE_DEV_LOGIN=false \
   --dart-define=QA_AUTO_LOGIN=false
 check_source_snapshot
+xcode_status=0
 run_check xcode_build_analyze xcodebuild \
   -workspace ios/Runner.xcworkspace -scheme Runner -configuration Release \
   -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath "$report_dir/DerivedData" -resultBundlePath "$report_dir/native.xcresult" \
   CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY= DEVELOPMENT_TEAM= \
-  -disableAutomaticPackageResolution build analyze
+  -disableAutomaticPackageResolution build analyze || xcode_status=$?
+# Generate evidence even after a failed native command. This parser does not
+# turn warnings into an artificial success or replace the actual Xcode status.
+python3 scripts/summarize-native-diagnostics.py "$report_dir/xcode_build_analyze.log" \
+  --input-completeness complete --xcode-exit-code "$xcode_status" \
+  > "$report_dir/native-diagnostics.json"
+[[ "$xcode_status" == 0 ]] || exit "$xcode_status"
 run_check bundled_resources python3 scripts/verify-ios-resources.py \
   "$report_dir/DerivedData/Build/Products/Release-iphoneos/Runner.app"
 check_source_snapshot
 echo 'Unsigned native build, analysis invocation and resource checks passed.'
 echo 'Signing, installation, device behavior, privacy correctness, live services and App Store submission remain unverified.'
-echo "Review analyzer warnings and resource inventory in $report_dir before making release claims."
+echo "Review native-diagnostics.json, the full log and resource inventory in $report_dir before making release claims."

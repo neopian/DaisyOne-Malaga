@@ -33,6 +33,7 @@ run_check backend_syntax npm --prefix backend run check
 run_check postgres_tests bash scripts/test-postgres-local.sh
 run_check preflight_tests python3 scripts/release-preflight-test.py
 run_check ios_runner_contracts python3 scripts/verify-ios-macos-test.py
+run_check native_diagnostic_contracts python3 scripts/summarize-native-diagnostics-test.py
 run_check web_build "$flutter_bin" build web --release --no-pub \
   --no-web-resources-cdn --pwa-strategy=none --dart-define=API_BASE_URL=/api \
   --dart-define=DEMO_MODE=false --dart-define=ENABLE_DEV_LOGIN=false \

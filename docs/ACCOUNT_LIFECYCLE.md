@@ -65,7 +65,10 @@ copy saved outside the app is under the user's control.
 Official packages are pinned to `flutter_secure_storage 11.2.0` and
 `share_plus 13.3.1`; dependency resolution records transitive versions in
 `pubspec.lock`. The Dart floor is 3.10. Android uses SDK minimum 23, Java 17,
-Kotlin 2.2.0, Android Gradle Plugin 8.12.1 and Gradle 8.13. iOS target is 13.
+Kotlin 2.2.0, Android Gradle Plugin 8.12.1 and Gradle 8.13. The owner-approved
+iOS target is 15.0; see [native evidence](CLOUD_IOS_BUILD.md). Android's retained
+23 target has not been validated and falls below Flutter 3.47's supported 24+
+floor; review Android support separately before an Android release.
 Android automatic app backup is disabled for secure storage compatibility.
 
 - https://pub.dev/packages/flutter_secure_storage

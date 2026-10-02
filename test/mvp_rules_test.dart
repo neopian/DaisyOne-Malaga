@@ -132,10 +132,6 @@ void main() {
         'HTTPS://EXAMPLE.COM/info?lang=ko#source',
         'https://sub-domain.example.com:8443/info',
         'https://example.com./info',
-        'http://localhost:8080/source',
-        'https://127.0.0.1/info',
-        'https://[2001:db8::1]/info',
-        'https://[::1]:8443/info',
         'https://xn--bcher-kva.example/source',
         'https://example.com/valid%20path?q=%ED%95%9C%EA%B5%AD',
       ];
@@ -191,6 +187,20 @@ void main() {
         'https://exam_ple.com',
         'https://example!.com',
         'https://.',
+        'http://localhost:8080/source',
+        'https://LOCALHOST/info',
+        'https://localhost./info',
+        'https://source.localhost/info',
+        'https://source.local/info',
+        'https://SOURCE.LOCAL./info',
+        'https://127.0.0.1/info',
+        'https://8.8.8.8/info',
+        'https://0x7f000001/info',
+        'https://0x7f.0.0.1/info',
+        'https://example.123/info',
+        'https://[2001:db8::1]/info',
+        'https://[::1]:8443/info',
+        'https://[::ffff:127.0.0.1]/info',
         'https://256.1.1.1',
         'https://127.1',
         'https://127.00.0.1',
@@ -227,6 +237,18 @@ void main() {
           MvpRules.isValidEvidenceUrl(
             'https://${List.filled(5, 'a' * 63).join('.')}',
           ),
+          isFalse,
+        );
+      });
+
+      test('서버 URL 길이 제한과 동일하게 2048자까지 허용한다', () {
+        const prefix = 'https://example.com/';
+        expect(
+          MvpRules.isValidEvidenceUrl('$prefix${'a' * (2048 - prefix.length)}'),
+          isTrue,
+        );
+        expect(
+          MvpRules.isValidEvidenceUrl('$prefix${'a' * (2049 - prefix.length)}'),
           isFalse,
         );
       });
@@ -270,6 +292,27 @@ void main() {
         ),
         isFalse,
       );
+    });
+
+    test('로컬 또는 IP 근거 주소로 답변을 제출할 수 없다', () {
+      for (final url in [
+        'http://localhost:8080/source',
+        'https://source.local/source',
+        'https://127.0.0.1/source',
+        'https://[2001:db8::1]/source',
+      ]) {
+        expect(
+          MvpRules.canSubmitAnswer(
+            body: '공식 사이트에서 직접 확인한 충분한 길이의 답변입니다.',
+            evidenceUrls: [url],
+            confirmedEvidence: true,
+            confirmedNoAiCopy: true,
+            confirmedNoGuess: true,
+          ),
+          isFalse,
+          reason: url,
+        );
+      }
     });
 
     test('근거와 모든 확인 체크가 있어도 짧은 본문은 제출할 수 없다', () {

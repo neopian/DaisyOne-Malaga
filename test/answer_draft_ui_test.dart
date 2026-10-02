@@ -213,6 +213,41 @@ void main() {
   }
 
   testWidgets(
+    'local evidence rejection explains public URLs and preserves input for correction',
+    (tester) async {
+      await mount(tester);
+      await tester.pumpAndSettle();
+      await enter(tester, 'URL', 'http://localhost:8080/source');
+      await tester.ensureVisible(find.text('근거 추가'));
+      await tester.tap(find.text('근거 추가'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text(apiErrorMessage('INVALID_EVIDENCE_URL')),
+        findsOneWidget,
+      );
+      expect(find.byTooltip('삭제'), findsNothing);
+      expect(
+        tester.widget<TextFormField>(field('URL')).controller!.text,
+        'http://localhost:8080/source',
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pump(const Duration(seconds: 5));
+      await tester.pumpAndSettle();
+      await enter(tester, 'URL', 'https://example.test/source');
+      await tester.ensureVisible(find.text('근거 추가'));
+      await tester.tap(find.text('근거 추가'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('삭제'), findsOneWidget);
+      expect(
+        tester.widget<TextFormField>(field('URL')).controller!.text,
+        isEmpty,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
     '320px double-text restores all unsent text and links with fresh confirmations',
     (tester) async {
       await tester.runAsync(() => store.save('user-a', draft(question: 'qA')));

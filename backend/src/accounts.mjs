@@ -25,7 +25,7 @@ export async function cleanDeletedAccountFiles({db,storage,mail,onError=()=>{},i
 }
 
 export function createAccountLifecycle({db,storage,cfg,fail,json,one,readJson,fields,text,publicUser,authenticate,authRate}) {
- let moderation;
+ let moderation,exchangeIssues;
  const mail=cfg.mail??{mode:'disabled'};
  const hash=value=>sign(cfg.imageSigningSecret,`account:${value}`);
  async function rate(request,purpose,maximum=20) {
@@ -145,6 +145,7 @@ export function createAccountLifecycle({db,storage,cfg,fail,json,one,readJson,fi
    const addStats=stats=>{totalRows+=Number(stats.count);totalBytes+=Number(stats.bytes)+32*Number(stats.count);};
    for(const sql of Object.values(selections))addStats(await one(tx,`SELECT count(*)::int AS count,coalesce(sum(octet_length(row_to_json(export_row)::text)),0)::bigint AS bytes FROM (${sql.replace(/ ORDER BY .+$/,'')}) export_row`,[user.id]));
    if(moderation)for(const stats of Object.values(await moderation.exportOwn(tx,user.id,{statsOnly:true})))addStats(stats);
+   if(exchangeIssues)for(const stats of Object.values(await exchangeIssues.exportOwn(tx,user.id,{statsOnly:true})))addStats(stats);
    if(includeImages){const size=await one(tx,'SELECT coalesce(sum(4*ceil(i.byte_length::numeric/3)),0)::bigint AS bytes FROM question_images i JOIN questions q ON q.id=i.question_id WHERE q.user_id=$1',[user.id]);totalBytes+=Number(size.bytes);}
    if(totalRows>10000||totalBytes>25*1024*1024)fail(413,'EXPORT_TOO_LARGE',includeImages?'This export exceeds the safe size limit. Retry without image bytes; no data has been exported.':'This account exceeds the safe export limit. Contact the service operator for a complete export; no data has been exported.');
    const images=await rows(selections.images);
@@ -153,6 +154,7 @@ export function createAccountLifecycle({db,storage,cfg,fail,json,one,readJson,fi
    const payload={format_version:1,exported_at:new Date().toISOString(),export_options:{include_images:includeImages,images_included:includeImages?images.length:0},profile:publicUser(user),images:exportedImages};
    for(const [name,sql] of Object.entries(selections))if(name!=='images')payload[name]=await rows(sql);
    if(moderation)Object.assign(payload,await moderation.exportOwn(tx,user.id));
+   if(exchangeIssues)Object.assign(payload,await exchangeIssues.exportOwn(tx,user.id));
    const response=json(payload);response.headers.set('Content-Disposition','attachment; filename="account-data.json"');return response;
   });
  }
@@ -205,6 +207,7 @@ export function createAccountLifecycle({db,storage,cfg,fail,json,one,readJson,fi
     await tx.query('DELETE FROM point_transactions WHERE user_id=$1',[user.id]);await tx.query('DELETE FROM idempotency_keys WHERE user_id=$1',[user.id]);
     await tx.query('DELETE FROM auth_idempotency_keys WHERE email=$1',[user.email]);
     await moderation?.eraseOwn(tx,user.id);
+    await exchangeIssues?.eraseOwn(tx,user.id);
     await tx.query('DELETE FROM users WHERE id=$1',[user.id]);return id;
    });
   }
@@ -212,7 +215,7 @@ export function createAccountLifecycle({db,storage,cfg,fail,json,one,readJson,fi
   const job=await one(db,'SELECT completed_at FROM account_deletion_jobs WHERE id=$1',[jobId]);
   return job?.completed_at?json({ok:true,account_deleted:true,status:'deleted'}):json({ok:true,account_deleted:true,status:'cleanup_pending',message:'Your account is deleted and images are inaccessible. Private file removal is pending server cleanup.'},202);
  }
- return {setModeration:value=>{moderation=value;},route:async(request,path,method)=>{
+ return {setModeration:value=>{moderation=value;},setExchangeIssues:value=>{exchangeIssues=value;},route:async(request,path,method)=>{
   if(method!=='POST')return null;
   if(!['/api/auth/email-verification/request','/api/auth/email-verification/confirm','/api/auth/password-reset/request','/api/auth/password-reset/confirm','/api/account/export','/api/account/delete'].includes(path))return null;
   const body=await readJson(request);

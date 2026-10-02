@@ -307,9 +307,7 @@ class _AnswerFormPageState extends ConsumerState<AnswerFormPage>
     }
     if (!MvpRules.isValidEvidenceUrl(_url.text)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('공백이나 로그인 정보가 없는 http 또는 https 근거 URL을 입력해주세요.'),
-        ),
+        SnackBar(content: Text(apiErrorMessage('INVALID_EVIDENCE_URL'))),
       );
       return false;
     }

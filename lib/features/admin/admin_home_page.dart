@@ -16,6 +16,7 @@ class AdminHomePage extends ConsumerWidget {
       title: '관리자',
       body: AsyncValueView(
         value: profile,
+        onRetry: () => ref.invalidate(currentProfileProvider),
         data: (user) {
           if (!user.isAdmin) {
             return const Center(
@@ -28,6 +29,26 @@ class AdminHomePage extends ConsumerWidget {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.pending_actions_outlined),
+                  title: const Text('응답 대기 현황'),
+                  subtitle: const Text('지역별 미응답 질문과 진행이 막힌 상태를 확인합니다'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.go('/admin/operations'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.assignment_outlined),
+                  title: const Text('진행 문제 검토'),
+                  subtitle: const Text('참여자가 남긴 비공개 진행 기록을 확인합니다'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.push('/admin/exchange-issues'),
+                ),
+              ),
+              const SizedBox(height: 8),
               Card(
                 child: ListTile(
                   leading: const Icon(Icons.verified_user_outlined),

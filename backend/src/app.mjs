@@ -4,6 +4,10 @@ import {consumeRateLimit} from './rate-limits.mjs';
 import {createModeration} from './moderation.mjs';
 import {sanitizeImage,ImageProcessingError} from './image-processing.mjs';
 import {findCity,locationAliases} from './city-catalog.mjs';
+import {createActivity} from './activity.mjs';
+import {createOperations} from './operations.mjs';
+import {createExchangeIssues} from './exchange-issues.mjs';
+import {createGuideDiscovery} from './guide-discovery.mjs';
 
 export class ApiError extends Error {
  constructor(status,code,message) {super(message);this.status=status;this.code=code;}
@@ -39,9 +43,8 @@ function stable(value) {
  if(value&&typeof value==='object') return `{${Object.keys(value).sort().map(k=>`${JSON.stringify(k)}:${stable(value[k])}`).join(',')}}`;
  return JSON.stringify(value);
 }
-async function readJson(request) {
+async function readJson(request,{maximum=22*1024*1024}={}) {
  if(!/^application\/json(?:;|$)/i.test(request.headers.get('content-type')??''))fail(415,'CONTENT_TYPE','Use application/json.');
- const maximum=22*1024*1024;
  if(Number(request.headers.get('content-length'))>maximum)fail(413,'PAYLOAD_TOO_LARGE','Request too large.');
  const reader=request.body?.getReader();if(!reader) return {};
  const chunks=[];let length=0;
@@ -180,12 +183,16 @@ export function createApp({db,storage,config={}}) {
     if(key) {
      const inserted=await tx.query('INSERT INTO idempotency_keys(user_id,key,fingerprint) VALUES($1,$2,$3) ON CONFLICT DO NOTHING RETURNING key',[actor.user.id,key,fingerprint]);
      const entry=await one(tx,'SELECT * FROM idempotency_keys WHERE user_id=$1 AND key=$2 FOR UPDATE',[actor.user.id,key]);
+     // Opt-in current authorization runs even when replay skips the operation.
+     // Keep idempotency before resource/user locks, as other mutation routes do.
+     if(options.authorize)await options.authorize(tx);
      if(entry.fingerprint!==fingerprint)fail(409,'IDEMPOTENCY_CONFLICT','This key was already used for a different request.');
      if(!inserted.rows.length) {
       if(entry.response_status===null)fail(409,'REQUEST_IN_PROGRESS','The request is still in progress. Retry with the same key.');
       return json(entry.response_body,entry.response_status);
      }
     }
+    if(!key&&options.authorize)await options.authorize(tx);
     const result=await operation(tx,written);
     const status=result.status??200,body=result.body??result;
     if(key)await tx.query('UPDATE idempotency_keys SET response_body=$3::jsonb,response_status=$4 WHERE user_id=$1 AND key=$2',[actor.user.id,key,JSON.stringify(body),status]);
@@ -202,7 +209,12 @@ export function createApp({db,storage,config={}}) {
  }
  const accounts=createAccountLifecycle({db,storage,cfg,fail,json,one,readJson,fields,text,publicUser,authenticate,authRate});
  const moderation=createModeration({db,cfg,fail,json,one,readJson,fields,text,choice,uuid,mutate});
+ const activityQuestions=createActivity({db,moderation,secret:cfg.imageSigningSecret,fail});
+ const guideDiscovery=createGuideDiscovery({db,moderation,secret:cfg.imageSigningSecret,fail,helperApproved,regionMatchSql,regionAliases});
+ const operationsQuestions=createOperations({db,moderation,secret:cfg.imageSigningSecret,fail});
+ const exchangeIssues=createExchangeIssues({db,moderation,secret:cfg.imageSigningSecret,fail,json,one,readJson,fields,text,choice,uuid,mutate});
  accounts.setModeration(moderation);
+ accounts.setExchangeIssues(exchangeIssues);
  async function route(request) {
   const url=new URL(request.url),path=url.pathname.replace(/\/$/,''),method=request.method;
   if(method==='GET'&&(path==='/health'||path==='/api/health')){await db.query('SELECT 1');return json({ok:true,database:db.engine??'postgres',mock_points:true});}
@@ -250,7 +262,11 @@ export function createApp({db,storage,config={}}) {
   const actor=await authenticate(request),{user,session}=actor;
   if(method==='GET'&&(path==='/api/auth/me'||path==='/api/profile'))return json(user);
   if(method==='POST'&&path==='/api/auth/logout'){await db.query('DELETE FROM sessions WHERE id=$1',[session.id]);return json({ok:true});}
+  const issueResponse=await exchangeIssues.route({request,path,method,url,actor});if(issueResponse)return issueResponse;
   const moderationResponse=await moderation.route({request,path,method,url,actor});if(moderationResponse)return moderationResponse;
+  if(method==='GET'&&path==='/api/activity/questions')return json(await activityQuestions(url,actor));
+  if(method==='GET'&&path==='/api/guide/discovery')return json(await guideDiscovery(url,actor));
+  if(method==='GET'&&path==='/api/admin/operations/questions')return json(await operationsQuestions(url,actor));
   if(method==='PATCH'&&path==='/api/profile') {
    const body=await readJson(request);fields(body,['current_country','current_city']);
    if(!Object.keys(body).length)fail(400,'VALIDATION','Provide a profile location.');

@@ -4,6 +4,195 @@ Cloud development only. No production application server or user-computer deploy
 The owner-private development Site is a separate browser-local demonstration.
 All accounts, questions, images, and point balances used for checks were synthetic.
 
+## 2026-10-02 compact guide discovery and queued authorization
+
+[Guide discovery](GUIDE_DISCOVERY.md) now uses compact 20-item pages instead of
+the capped nested regional feed. The same current approval/region rules govern
+discovery and claiming. The client retains its page window while scrolling,
+puts page errors beside the load-more action, and prevents repeated taps from
+stacking detail routes. Reopening a conversation releases old cached detail and
+rechecks access; its failing-before regression demonstrated the stale content.
+
+Final local Flutter checks passed **561 tests**, full analysis, formatting and
+a production web release build with demo/dev/QA login disabled. Two actual
+synthetic Flutter mobile renders, including doubled text, were visually
+inspected. The normal-login diagnostic preview build also passed and was
+packaged locally. The adapter passed 70 API suites, 3 photo suites, 37 launcher
+checks, source provenance and 12 packaging/cache checks. Its classic worker is
+78,244 bytes; no SQL/WASM engine or runtime imports were added. Hosted/browser
+interaction and physical-device behavior have not been reverified.
+
+The final backend tree passed **149 real PostgreSQL/HTTP tests**, zero skips,
+plus syntax/catalog checks. Exact backend tree identity was checked after
+integration. Four deterministic personal/operator queue tests first reproduced
+HTTP 200 after logout or session expiry behind the moderation gate; the repaired
+routes return 401. A further regression demonstrated the lock inversion that
+would result from retaining question locks after new user/session locks. The
+final one-statement activity snapshot completes concurrently with acceptance
+and rewards exactly once. Private issue session expiry likewise uses current
+wall-clock time after a wait. Older gated routes remain a separate pending
+authorization audit; these checks do not certify the whole authentication surface.
+
+Release tooling contracts passed 20 preflight, 19 iOS-runner and 13 native
+diagnostic tests. Static preflight remains **24 checked / 18 blocked** with the
+unconfigured release example. The source warning for the raw upstream geocoding
+manifest path remains distinct from the previously verified native repair.
+No new native compilation, signing, remote CI, repository/Site publication or
+live-service check occurred. The earlier unsigned native run remains historical
+evidence for revision `930c683` only.
+
+## 2026-10-02 private exchange issue intake
+
+[Exchange issue records](EXCHANGE_ISSUES.md) remain reachable through safe references
+when an assigned conversation is hidden or blocked. Reporter reads exclude the
+other participant's record and internal review notes. A one-time administrator
+review never changes work or financial state. Export size/privacy and deletion
+include the new records and authored notes, including concurrent deletion/review.
+
+Final integrated source passed **519 Flutter tests**, complete analysis,
+**130 real PostgreSQL/backend tests**, zero skips, syntax/catalog checks and a
+production web release build with demo/dev/QA login disabled. New checks include
+concurrent idempotency/quotas/reviews, authorization before replay, acceptance
+and deletion lock ordering, direct scoped lookup, cross-tab access loss, a single
+missing record without global lockout, cancelled dialogs, new route queries and
+small enlarged-text screens. The guide form also now isolates account/session
+work; three regressions demonstrated its previous cross-account failures.
+
+An actual local Flutter intake screenshot uses visibly synthetic fixtures and
+was visually inspected. The separately restored browser-local adapter passed
+35 legacy REST, 7 activity/operations, 20 issue and 3 photo API suites plus source
+checks, 37 launcher checks and 12 final packaging/cache checks. The normal-login
+diagnostic Flutter web build was packaged locally with QA auto-login off. Its
+classic worker is 77,480 bytes with no runtime imports or SQL/WASM engine;
+adapter version light-api-974b9fe602f8 and app artifact c22de2c1d5b62d57 identify the local staging package. Native
+browser photo codecs, hosted interaction and physical-device behavior remain
+unverified. No new source/Site publication, native CI or signing occurred.
+
+## 2026-10-02 operator demand and profile session boundaries
+
+[Operator demand](OPERATIONS_QUEUE.md) adds an active-admin-only, city-filtered,
+oldest-first view of open/assigned/answered questions with coherent current
+counts and restriction flags. It exposes unresolved work without adding an
+availability, response or settlement promise. Profile GPS work now stays bound
+to the initiating account/session; three prior cross-account failures were
+reproduced and repaired. Login/window labels use neutral “여행 Q&A”.
+
+Final checks passed: **396 Flutter tests**, complete analysis, **107 real
+PostgreSQL/backend tests** with zero skips, backend syntax/catalog checks and
+production web release build (demo/dev/QA login off). Five profile tests include
+valid same-account location updates and interrupted/cross-account results.
+New transport coverage proves negotiated gzip preserves compact activity and
+operator pages while denied responses remain uncompressed. Changed Dart files
+and Git whitespace checks pass. One actual local Flutter operator render with
+synthetic records was visually inspected; no hosted/browser/device claim is made.
+
+The earlier native iOS result remains for revision930c683. This local milestone
+has no new repository/Site publication, native CI, signing or production run.
+
+## 2026-10-02 personal activity and guide return journeys
+
+[Personal activity](PERSONAL_ACTIVITY.md) adds map-independent traveler and guide
+queues, authenticated cursor pagination and compact payloads. The uncertain
+photo-submission lookup now uses personal pages instead of the global capped
+feed. Map errors remain explicit with a usable retry, including in an expanded
+sheet. Guide rejection/reapplication, source-URL validation and recorded answer
+submission time were repaired, including narrow/enlarged-text layout defects.
+
+Final integrated local checks:
+
+- **362 Flutter tests passed** under `TZ=Asia/Seoul`, including the final
+  account/view request guard; complete analyzer passed and the final guard's
+  focused analysis passed
+- **96 backend tests passed against real PostgreSQL 17.11**, zero skipped,
+  including actual HTTP paging/security tests; backend syntax/catalog checks passed
+- Production web release build passed with demo/development/QA login disabled
+- Changed Dart files are formatted and Git whitespace checks pass
+- Two actual local Flutter screenshots of synthetic traveler/guide queues were
+  rendered and visually inspected; 320px doubled-text behavior is covered by tests
+
+The activity tests prove that 260 newer unrelated public questions cannot hide
+own work; exact PostgreSQL microseconds and ID ties survive page boundaries.
+They exercise hidden rows, bilateral blocks, account/participant suspension,
+admin ownership, strict signed cursors and absence of private detail/media fields.
+Client regressions cover retries, deduplication, tab/account changes, late replies,
+authorization clearing, detail return and conservative submission recovery.
+
+The PostgreSQL distribution was restored from official Debian packages into the
+cloud workspace after the previous runtime disappeared. The existing isolated
+cluster harness creates disposable synthetic databases; there is no in-memory
+substitute or production data. No dependency versions or native platform files
+changed in this milestone.
+
+This revision has not been published to the private Site or repository and has
+not had a new iOS build, signing, device run or App Store submission. Local UI
+renders are not hosted-browser or physical-device evidence. Existing source,
+privacy/operations and deployment gates remain in [RELEASE_BACKLOG](RELEASE_BACKLOG.md).
+
+## 2026-10-02 interrupted question-comment recovery
+
+Two failures were demonstrated with failing regressions before repair: the
+15-second detail refresh discarded an unsent comment after a network failure,
+and an HTTP408 discarded the mutation key so retrying could create a duplicate
+comment. See [OFFLINE_COMMENT_RECOVERY](OFFLINE_COMMENT_RECOVERY.md).
+
+The page now retains only its account/question-scoped input and submission
+state above the error view. Server question content remains hidden on error.
+Access-denied/not-found responses and account/question changes clear input;
+late acknowledgements cannot clear a newer draft. HTTP408 preserves its key.
+
+Final local validation: **320 Flutter tests passed**, clean analyzer, production
+web release build passed with demo/dev/QA login disabled, formatting and
+whitespace clean. The eight added cases cover real page/provider/poller behavior
+with controlled HTTP failure,403/404, account/route reuse, delayed acknowledgement,
+double tap, and JSON/HTML408 retries including client recreation. The existing
+transport cases continue to verify terminal rejection and acknowledgement cleanup.
+
+No dependencies, backend rules, iOS baseline or deployment configuration changed.
+This pass did not repeat unchanged PostgreSQL/native script checks, run native CI,
+publish the source/Site, or exercise a physical mobile device. Comment input is
+retained only while this detail page remains alive, not durably across restart.
+
+## 2026-10-02 approved iOS 15 baseline and recovered-source validation
+
+The owner approved iOS 15+ support. The six native files generated by successful
+unsigned run [36998188451](https://github.com/neopian/DaisyOne-Malaga/actions/runs/36998188451)
+were hash-checked and adopted locally. Pod dependencies and checksums are the
+actual macOS resolution. Correcting the stale Podfile comment changes only its
+recorded input checksum. [Cloud iOS evidence](CLOUD_IOS_BUILD.md) distinguishes
+that earlier build from the later local changes.
+
+After the cloud runtime replacement, all **308 archived source files** matched
+the public review revision byte-for-byte. The photo recovery implementation and
+unit-test blobs also match their recorded earlier hashes; its two widget flows
+were restored and rerun. The recovered local commits have new identities.
+Source and toolchain now reside in the persistent project workspace.
+
+Current local checks passed:
+
+- Lockfile-enforced Flutter dependencies, clean analysis, **312 Flutter tests**
+- Production web release build with demo, development login and QA auto-login off
+- **20 release-preflight tests**, **19 iOS runner/resource tests**, and **13
+  native-diagnostic tests**, plus shell syntax, formatting and whitespace checks
+- Exact iOS15 source/lifecycle/lock checks, framework-source mutation detection,
+  and retention of an Xcode failure's status and diagnostic evidence
+
+The native log summarizer scans full available logs before provider tail limits,
+keeps warnings separate from build success, and reports incomplete evidence.
+The surviving earlier tail correctly reports five issue-producing analyzer
+commands with missing diagnostic details; no warning is claimed repaired.
+
+Static release preflight reports **24 checked / 18 blocked** using the public
+example configuration. Identity, live services, privacy and device gates remain
+open. The raw geocoding package-path mismatch and preferences reason review
+remain visible despite the earlier successful bundled-resource inspection.
+
+There was no new native compilation, signing, remote CI/publication or Site
+deployment. The stricter embedded-framework checks have only synthetic fixture
+evidence until a future authorized native run. Backend source is unchanged and
+its previously recorded PostgreSQL suite was not repeated for this local
+native/client/checker change. The unchanged development Site retains its earlier
+browser-local preview limits.
+
 ## 2026-10-02 Europe/US city scope and cloud iOS preparation
 
 The owner selected Europe/US major cities and an initial virtual-point plus

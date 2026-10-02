@@ -1,6 +1,6 @@
-# Current Flutter and native plugins require iOS 13 or later. This minimum
+# Approved device support starts at iOS 15, matching pinned Flutter 3.47.5. This minimum
 # device OS is independent of Apple's current submission SDK requirement.
-platform :ios, '13.0'
+platform :ios, '15.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'

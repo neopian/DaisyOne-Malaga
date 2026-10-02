@@ -18,6 +18,15 @@ void main() {
     });
   }
   test(
+    'evidence rejection explains public website and local/IP restrictions',
+    () {
+      expect(
+        apiErrorMessage('INVALID_EVIDENCE_URL'),
+        '공개 웹사이트의 http 또는 https 주소를 입력해주세요. 로컬·IP 주소나 공백·로그인 정보가 있는 URL은 사용할 수 없습니다.',
+      );
+    },
+  );
+  test(
     'unknown English errors fall back to Korean; Korean details survive',
     () {
       expect(apiErrorMessage('UNKNOWN', 'SQL details'), isNot(contains('SQL')));

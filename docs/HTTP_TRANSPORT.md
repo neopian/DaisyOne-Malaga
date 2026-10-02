@@ -2,7 +2,8 @@
 
 The Node HTTP bridge negotiates streaming gzip for successful 200 JSON GET
 responses from `/api/questions`, `/api/questions/:id`, `/api/guide/questions`,
-and `/api/points`. Search/detail fields, ordering, authorization and response
+`/api/points`, `/api/activity/questions`, `/api/admin/operations/questions` and
+`/api/guide/discovery`. Search/detail fields, ordering, authorization and response
 models are unchanged. Compression runs after the application produces its
 response. This reduces transferred bytes; it does not reduce database query
 work or make the application's existing JSON generation itself streaming.

@@ -168,11 +168,13 @@ class ApiClient {
     } on ApiException catch (error) {
       // Unknown outcomes retain the key. A 401 on a durable operation may
       // precede replay lookup for a previously committed request: reauth must
-      // not turn that retry into a second question or point hold.
+      // not turn that retry into a second question or point hold. An HTTP 408
+      // from an intermediary is also uncertain, like a local response timeout.
       if ((!durable && error.code == 'AUTH_RETRY_EXPIRED') ||
           (error.status != null &&
               error.status! >= 400 &&
               error.status! < 500 &&
+              error.status != 408 &&
               error.status != 429 &&
               error.status != 409 &&
               !(durable && error.status == 401))) {
@@ -312,7 +314,8 @@ String apiErrorMessage(String code, [String? serverMessage]) {
     'QUESTION_CLOSED': '종료된 질문입니다. 질문 상태를 새로고침해주세요.',
     'QUESTION_EXPIRED': '질문의 유효 시간이 지났습니다. 질문 상태를 새로고침해주세요.',
     'EVIDENCE_REQUIRED': '확인할 수 있는 근거 URL을 한 개 이상 추가해주세요.',
-    'INVALID_EVIDENCE_URL': '올바른 http 또는 https 근거 URL을 입력해주세요.',
+    'INVALID_EVIDENCE_URL':
+        '공개 웹사이트의 http 또는 https 주소를 입력해주세요. 로컬·IP 주소나 공백·로그인 정보가 있는 URL은 사용할 수 없습니다.',
     'INVALID_IMAGE':
         'JPG·PNG·WebP 정지 사진만 첨부할 수 있습니다. 장당 3MiB·2,000만 화소 이하의 사진을 선택해주세요. 처리 후 용량이 크면 더 작은 사진을 사용해주세요.',
     'IMAGE_PROCESSING_BUSY': '사진을 처리하는 요청이 많습니다. 잠시 후 다시 등록해주세요.',

@@ -41,7 +41,7 @@ void main() {
             theme: buildAppTheme(),
             routerConfig: router,
             builder: (_, child) => MediaQuery(
-              data: const MediaQueryData(textScaler: TextScaler.linear(1.6)),
+              data: const MediaQueryData(textScaler: TextScaler.linear(2)),
               child: child!,
             ),
           ),
@@ -49,6 +49,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      expect(find.text('여행 Q&A'), findsOneWidget);
+      expect(find.text('malaga'), findsNothing);
       final password = find.byType(TextFormField).at(1);
       await tester.ensureVisible(password);
       await tester.enterText(password, 'local-test-password');

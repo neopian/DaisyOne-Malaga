@@ -207,6 +207,12 @@ class _AccountSettingsPageState extends ConsumerState<AccountSettingsPage> {
               ),
             ),
             TextButton(
+              onPressed: _busy || user == null || user.isSuspended
+                  ? null
+                  : () => context.push('/account/exchange-issues'),
+              child: const Text('진행 문제 기록'),
+            ),
+            TextButton(
               onPressed: _busy || user == null
                   ? null
                   : () => context.push('/account/blocked'),

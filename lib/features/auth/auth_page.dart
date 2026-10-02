@@ -474,11 +474,13 @@ class _WelcomeHeader extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            Text(
-              'malaga',
-              style: theme.textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w700,
-                letterSpacing: -.5,
+            Expanded(
+              child: Text(
+                '여행 Q&A',
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -.5,
+                ),
               ),
             ),
           ],

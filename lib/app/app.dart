@@ -32,7 +32,7 @@ class ConciergeApp extends ConsumerWidget {
     }
     final router = ref.watch(routerProvider);
     return MaterialApp.router(
-      title: 'malaga · 현지의 답',
+      title: '여행 Q&A · 현지의 답',
       theme: buildAppTheme(),
       routerConfig: router,
       debugShowCheckedModeBanner: false,
@@ -55,9 +55,9 @@ class ConciergeApp extends ConsumerWidget {
                           textAlign: TextAlign.center,
                           style: Theme.of(context).textTheme.labelSmall
                               ?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onPrimaryContainer,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onPrimaryContainer,
                                 fontSize: 11,
                               ),
                         ),

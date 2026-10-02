@@ -2,9 +2,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../shared/models/app_user.dart';
+import '../features/activity/activity_page.dart';
+import '../features/activity/activity_repository.dart';
 import '../features/admin/admin_helper_applications_page.dart';
 import '../features/admin/admin_home_page.dart';
 import '../features/admin/admin_reports_page.dart';
+import '../features/admin/operations_page.dart';
+import '../features/exchange_issues/exchange_issues_page.dart';
 import '../features/account/account_settings_page.dart';
 import '../features/auth/password_recovery_page.dart';
 import '../features/auth/email_verification_page.dart';
@@ -26,10 +30,15 @@ import '../features/questions/question_home_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final auth = ref.watch(authRepositoryProvider);
-  var userId = auth.currentUser?.id;
+  Object accountScope() => (
+    auth.currentUser?.id,
+    auth.currentUser?.isAdmin,
+    auth.currentUser?.isSuspended,
+  );
+  var scope = accountScope();
   void onSessionChange() {
-    if (userId == auth.currentUser?.id) return;
-    userId = auth.currentUser?.id;
+    if (scope == accountScope()) return;
+    scope = accountScope();
     invalidateSessionScopedProvidersForRef(ref);
   }
 
@@ -66,12 +75,36 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const BlockedUsersPage(),
       ),
       GoRoute(
+        path: '/account/exchange-issues',
+        builder: (context, state) => ExchangeIssuesPage(
+          questionId: state.uri.queryParameters['question'],
+        ),
+      ),
+      GoRoute(
+        path: '/admin/exchange-issues',
+        builder: (context, state) => const ExchangeIssuesPage(admin: true),
+      ),
+      GoRoute(
+        path: '/admin/operations',
+        builder: (context, state) => const OperationsPage(),
+      ),
+      GoRoute(
         path: '/admin/reports',
         builder: (context, state) => const AdminReportsPage(),
       ),
       GoRoute(
         path: '/home',
         builder: (context, state) => const QuestionHomePage(),
+      ),
+      GoRoute(
+        path: '/activity/traveler',
+        builder: (context, state) =>
+            const ActivityPage(role: ActivityRole.traveler),
+      ),
+      GoRoute(
+        path: '/activity/guide',
+        builder: (context, state) =>
+            const ActivityPage(role: ActivityRole.guide),
       ),
       GoRoute(
         path: '/questions/new',

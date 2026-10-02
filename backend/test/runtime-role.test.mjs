@@ -7,7 +7,7 @@ import {seedDevelopment} from '../src/seed-data.mjs';
 import {randomId} from '../src/crypto.mjs';
 import {createMemoryMailSink,drainAccountMail} from '../src/account-mail.mjs';
 
-test('least-privilege runtime role can use final account and moderation schema', {
+test('least-privilege runtime role can use account, moderation and exchange issue schema', {
  skip: !process.env.TEST_RUNTIME_DATABASE_URL && 'Use scripts/test-postgres-local.sh for the separate runtime role check',
 }, async()=>{
  assert.ok(process.env.TEST_DATABASE_URL);
@@ -47,8 +47,15 @@ test('least-privilege runtime role can use final account and moderation schema',
   const report=await call('/reports',{token:operator.token,body:{target_type:'question',target_id:question.id,reason:'other'}});
   await call(`/admin/reports/${report.id}/review`,{token:operator.token,body:{action:'hide',note:'Synthetic runtime check'}});
   await call(`/admin/reports/${report.id}/review`,{token:operator.token,body:{action:'restore'}});
-  const exported=await call('/account/export',{token:user.token,body:{password:'synthetic-runtime-password'}});assert.equal(exported.profile.id,user.user.id);
+  await call(`/questions/${question.id}/accept`,{token:guide.token,body:{}});
+  const eligible=await call('/exchange-issues/eligible',{token:user.token});assert.equal(eligible.items[0].question_id,question.id);
+  const issue=await call('/exchange-issues',{token:user.token,body:{question_id:question.id,reason:'waiting_for_response',details:'Synthetic private intake'}});
+  await call(`/admin/exchange-issues/${issue.id}/review`,{token:operator.token,body:{note:'Synthetic runtime issue review'}});
+  assert.equal((await call('/exchange-issues',{token:user.token})).items[0].status,'reviewed');
+  assert.equal((await call('/admin/exchange-issues?status=reviewed',{token:operator.token})).items[0].review_note,'Synthetic runtime issue review');
+  const exported=await call('/account/export',{token:user.token,body:{password:'synthetic-runtime-password'}});assert.equal(exported.profile.id,user.user.id);assert.equal(exported.exchange_issues[0].id,issue.id);assert.deepEqual(exported.exchange_issue_reviews,[]);
   const deleted=await call('/account/delete',{token:user.token,body:{password:'synthetic-runtime-password',confirmation:'DELETE'}});assert.equal(deleted.account_deleted,true);
+  assert.equal((await owner.query('SELECT id FROM exchange_issues WHERE id=$1',[issue.id])).rows.length,0);
   assert.equal((await owner.query('SELECT id FROM users WHERE id=$1',[user.user.id])).rows.length,0);
  } finally {
   await runtime?.close();await owner?.close();await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await admin.end();

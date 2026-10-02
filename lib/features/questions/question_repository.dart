@@ -18,7 +18,12 @@ final helperOpenQuestionsProvider = FutureProvider<List<Question>>((ref) {
   ref.watch(authStateProvider);
   return ref.watch(questionRepositoryProvider).fetchOpenQuestions();
 });
-final questionProvider = FutureProvider.family<Question, String>((ref, id) {
+// Conversation content must not survive its last consumer. Reopening
+// detail rechecks authorization instead of showing an offscreen cached result.
+final questionProvider = FutureProvider.autoDispose.family<Question, String>((
+  ref,
+  id,
+) {
   ref.watch(authStateProvider);
   return ref.watch(questionRepositoryProvider).fetchQuestion(id);
 });
@@ -28,6 +33,20 @@ class QuestionRepository {
   final ApiClient _client;
   static const maxImages = 5;
   static const maxImageBytes = 3 * 1024 * 1024;
+
+  // These operations finish before an HTTP mutation can begin. A picker can
+  // return an inaccessible/deleted temporary file; report a definite local
+  // failure so the form can replace it. Never wrap transport in this boundary.
+  Future<T> _readPhotoFile<T>(Future<T> Function() read) async {
+    try {
+      return await read();
+    } catch (_) {
+      throw const ApiException(
+        '사진을 읽지 못했어요. 사진을 다시 선택해주세요.',
+        code: 'invalid_image',
+      );
+    }
+  }
 
   Question _question(Map<String, dynamic> row) {
     final imageRows = row['question_images'] as List? ?? [];
@@ -87,13 +106,13 @@ class QuestionRepository {
     }
     final encodedImages = <Map<String, dynamic>>[];
     for (final image in images) {
-      if (await image.length() > maxImageBytes) {
+      if (await _readPhotoFile(image.length) > maxImageBytes) {
         throw const ApiException(
           '사진 한 장의 크기는 3MB 이하여야 합니다.',
           code: 'invalid_image',
         );
       }
-      final bytes = await image.readAsBytes();
+      final bytes = await _readPhotoFile(image.readAsBytes);
       if (bytes.length > maxImageBytes) {
         throw const ApiException(
           '사진 한 장의 크기는 3MB 이하여야 합니다.',

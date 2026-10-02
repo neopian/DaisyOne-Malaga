@@ -1,7 +1,7 @@
 # Manual-only unsigned review measurement; no push or scheduled trigger.
-# Owner approved this public review branch, a workflow-only main change, and ONE
-# free standard-macOS unsigned bootstrap run. GitHub connection and verified
-# zero-cost eligibility remain prerequisites. No automatic rerun or paid fallback.
+# Owner approved this public review branch, workflow-only main changes, and
+# free standard-macOS unsigned validation until it succeeds. Verify zero cost
+# before execution. No push trigger, paid fallback, signing or submission.
 name: Measure unsigned iOS bootstrap
 
 'on':
@@ -112,6 +112,10 @@ jobs:
             "refs/tags/$FLUTTER_VERSION:refs/tags/$FLUTTER_VERSION"
           [[ "$(git -C "$sdk_dir" rev-parse "refs/tags/$FLUTTER_VERSION^{commit}")" == "$FLUTTER_COMMIT" ]]
           git -C "$sdk_dir" checkout --detach "$FLUTTER_COMMIT"
+          # A cold Flutter checkout may print download/bootstrap progress before
+          # JSON. Complete that work first, then keep machine output strict.
+          "$sdk_dir/bin/flutter" --version \
+            2>&1 | tee "$RUNNER_TEMP/ios-ci-evidence/flutter-bootstrap.log"
           "$sdk_dir/bin/flutter" --version --machine > "$RUNNER_TEMP/ios-ci-evidence/flutter-version.json"
           python3 - <<'PY'
           import json, os, pathlib

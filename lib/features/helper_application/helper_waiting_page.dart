@@ -6,12 +6,14 @@ import '../../shared/widgets/app_page.dart';
 import '../../shared/widgets/async_value_view.dart';
 import '../../shared/widgets/status_chip.dart';
 import 'helper_repository.dart';
+import '../questions/question_realtime.dart';
 
 class HelperWaitingPage extends ConsumerWidget {
   const HelperWaitingPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    ref.watch(questionRealtimeProvider);
     final application = ref.watch(helperApplicationProvider);
     return AppPage(
       title: '답변자 상태',

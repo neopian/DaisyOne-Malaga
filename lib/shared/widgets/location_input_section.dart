@@ -162,7 +162,7 @@ class _EditingLocationFields extends StatelessWidget {
                   decoration: const InputDecoration(labelText: '국가'),
                   child: Text(
                     section.countryController.text.trim().isEmpty
-                        ? 'Spain'
+                        ? '국가 선택'
                         : section.countryController.text.trim(),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,

@@ -22,15 +22,17 @@ class _SplashPageState extends ConsumerState<SplashPage> {
   Future<void> _route() async {
     await Future<void>.delayed(const Duration(milliseconds: 450));
     final repo = ref.read(authRepositoryProvider);
-    final user = repo.currentUser;
+    await repo.restoreSession();
     if (!mounted) return;
-    if (user == null) {
+    if (repo.currentUser == null) {
       invalidateSessionScopedProviders(ref);
+      if (repo.restorationError != null) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(repo.restorationError!)));
+      }
       context.go('/auth');
-      return;
-    }
-    await repo.ensureProfile(user: user);
-    if (mounted) {
+    } else {
       context.go('/home');
     }
   }

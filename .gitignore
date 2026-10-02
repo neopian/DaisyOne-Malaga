@@ -31,3 +31,7 @@ app.*.map.json
 # Local environment
 .env
 .env.*
+deploy.env
+
+# Local verification logs and public preflight output
+.verification/

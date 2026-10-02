@@ -1,53 +1,44 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/services/supabase_service.dart';
+import '../../core/services/api_service.dart';
+import '../../shared/models/guide_summary.dart';
 import '../../shared/models/helper_application.dart';
 import '../../shared/models/helper_region.dart';
+import '../auth/auth_repository.dart';
 
-final helperRepositoryProvider = Provider<HelperRepository>((ref) {
-  return HelperRepository(ref.watch(supabaseClientProvider));
-});
-
+final helperRepositoryProvider = Provider<HelperRepository>(
+  (ref) => HelperRepository(ref.watch(apiClientProvider)),
+);
 final helperApplicationProvider = FutureProvider<HelperApplication?>((ref) {
+  ref.watch(authStateProvider);
   return ref.watch(helperRepositoryProvider).fetchCurrentApplication();
 });
-
 final helperRegionsProvider = FutureProvider<List<HelperRegion>>((ref) {
+  ref.watch(authStateProvider);
   return ref.watch(helperRepositoryProvider).fetchCurrentRegions();
+});
+
+final guideSummaryProvider = FutureProvider<GuideSummary>((ref) {
+  ref.watch(authStateProvider);
+  return ref.watch(helperRepositoryProvider).fetchGuideSummary();
 });
 
 class HelperRepository {
   const HelperRepository(this._client);
+  final ApiClient _client;
 
-  final SupabaseClient _client;
+  Future<GuideSummary> fetchGuideSummary() async =>
+      GuideSummary.fromMap(await _client.getMap('guide/me'));
 
   Future<HelperApplication?> fetchCurrentApplication() async {
-    final user = _client.auth.currentUser;
-    if (user == null) return null;
-    final row = await _client
-        .from('helper_applications')
-        .select()
-        .eq('user_id', user.id)
-        .maybeSingle();
-    if (row == null) return null;
-    return HelperApplication.fromMap(Map<String, dynamic>.from(row));
+    final row = await _client.get('helper/application');
+    return row == null ? null : HelperApplication.fromMap(ApiClient.asMap(row));
   }
 
-  Future<List<HelperRegion>> fetchCurrentRegions() async {
-    final user = _client.auth.currentUser;
-    if (user == null) return const [];
-    final rows = await _client
-        .from('helper_regions')
-        .select()
-        .eq('helper_user_id', user.id)
-        .order('created_at');
-    return (rows as List)
-        .map(
-          (row) => HelperRegion.fromMap(Map<String, dynamic>.from(row as Map)),
-        )
-        .toList();
-  }
+  Future<List<HelperRegion>> fetchCurrentRegions() async =>
+      (await _client.getList(
+        'helper/regions',
+      )).map(HelperRegion.fromMap).toList();
 
   Future<void> apply({
     required List<String> languages,
@@ -55,42 +46,23 @@ class HelperRepository {
     required String introduction,
     required String experienceDescription,
   }) async {
-    final user = _client.auth.currentUser;
-    if (user == null) {
-      throw StateError('로그인이 필요합니다.');
-    }
-
-    await _client.from('helper_applications').upsert({
-      'user_id': user.id,
-      'status': 'pending',
-      'languages': languages,
-      'introduction': introduction.trim(),
-      'experience_description': experienceDescription.trim(),
-      'applied_at': DateTime.now().toUtc().toIso8601String(),
-      'reviewed_at': null,
-      'reviewed_by': null,
-      'reject_reason': null,
-    }, onConflict: 'user_id');
-
-    await _client.from('helper_regions').delete().eq('helper_user_id', user.id);
-    if (regions.isNotEmpty) {
-      await _client
-          .from('helper_regions')
-          .insert(
-            regions
-                .map(
-                  (region) => {
-                    'helper_user_id': user.id,
-                    'country': region.country.trim(),
-                    'city': region.city.trim(),
-                    'region_name': region.regionName?.trim().isEmpty ?? true
-                        ? null
-                        : region.regionName!.trim(),
-                  },
-                )
-                .toList(),
-          );
-    }
+    await _client.mutate(
+      'helper/application',
+      body: {
+        'languages': languages,
+        'regions': regions
+            .map(
+              (region) => {
+                'country': region.country.trim(),
+                'city': region.city.trim(),
+                'region_name': region.regionName?.trim(),
+              },
+            )
+            .toList(),
+        'introduction': introduction.trim(),
+        'experience_description': experienceDescription.trim(),
+      },
+    );
   }
 }
 
@@ -100,7 +72,6 @@ class RegionInput {
     required this.city,
     this.regionName,
   });
-
   final String country;
   final String city;
   final String? regionName;

@@ -1,9 +1,7 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
 
-import '../geo/spain_geo.dart';
+import '../geo/city_catalog.g.dart';
 
 class DeviceLocation {
   const DeviceLocation({
@@ -43,12 +41,6 @@ class LocationService {
   Future<DeviceCoordinates> getCurrentCoordinates() async {
     try {
       final position = await _getCurrentPosition();
-      if (!SpainGeo.isWithinSpainBounds(
-        latitude: position.latitude,
-        longitude: position.longitude,
-      )) {
-        throw StateError('현재 위치가 스페인 밖입니다. 스페인 지역만 표시할 수 있습니다.');
-      }
       return DeviceCoordinates(
         latitude: position.latitude,
         longitude: position.longitude,
@@ -66,62 +58,20 @@ class LocationService {
     try {
       final position = await _getCurrentPosition();
 
-      if (!SpainGeo.isWithinSpainBounds(
+      final city = CityCatalog.nearestSupported(
         latitude: position.latitude,
         longitude: position.longitude,
-      )) {
-        throw StateError('현재 위치가 스페인 밖입니다. 스페인 지역만 질문할 수 있습니다.');
+      );
+      if (city == null) {
+        throw StateError('선택 가능한 도시에서 멀리 떨어져 있습니다. 여행할 도시를 직접 선택해주세요.');
       }
-
-      if (kIsWeb) {
-        final place = SpainGeo.nearestPlace(
-          latitude: position.latitude,
-          longitude: position.longitude,
-        );
-        return DeviceLocation(
-          country: 'Spain',
-          city: place.city,
-          latitude: position.latitude,
-          longitude: position.longitude,
-        );
-      }
-
-      final places = await placemarkFromCoordinates(
-        position.latitude,
-        position.longitude,
-      ).timeout(const Duration(seconds: 12));
-
-      if (places.isEmpty) {
-        throw StateError('현재 위치의 주소를 찾지 못했습니다.');
-      }
-
-      final place = places.first;
-      final country = (place.country ?? '').trim();
-      if (!SpainGeo.isSpainCountry(country)) {
-        throw StateError('현재 위치가 스페인 밖입니다. 스페인 지역만 질문할 수 있습니다.');
-      }
-
-      final city = _firstNonEmpty([
-        place.locality,
-        place.subAdministrativeArea,
-        place.administrativeArea,
-      ]);
-      final region = _firstNonEmpty([
-        place.subLocality,
-        place.thoroughfare,
-        place.name,
-      ]);
-
-      if (country.isEmpty || city.isEmpty) {
-        throw StateError('현재 위치의 국가/도시를 확인하지 못했습니다.');
-      }
-
+      // This is a nearby catalog association, not reverse-geocoded territory or
+      // a promise of guide availability. Manual city selection always works.
       return DeviceLocation(
-        country: 'Spain',
-        city: city,
+        country: city.country,
+        city: city.city,
         latitude: position.latitude,
         longitude: position.longitude,
-        regionName: region.isEmpty ? null : region,
       );
     } on MissingPluginException {
       throw StateError('위치 기능 적용을 위해 앱을 완전히 종료한 뒤 다시 실행해 주세요.');
@@ -154,13 +104,5 @@ class LocationService {
         timeLimit: Duration(seconds: 12),
       ),
     );
-  }
-
-  static String _firstNonEmpty(List<String?> values) {
-    for (final value in values) {
-      final trimmed = value?.trim() ?? '';
-      if (trimmed.isNotEmpty) return trimmed;
-    }
-    return '';
   }
 }

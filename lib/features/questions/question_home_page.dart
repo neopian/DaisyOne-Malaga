@@ -4,19 +4,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 
-import '../../core/geo/spain_geo.dart';
+import '../../core/geo/city_catalog.g.dart';
 import '../../core/services/location_service.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/models/question.dart';
 import '../../shared/widgets/app_drawer.dart';
 import '../../shared/widgets/status_chip.dart';
+import '../../shared/widgets/travel_city_picker.dart';
 import 'question_realtime.dart';
 import 'question_repository.dart';
 
 const _currentLocationZoom = 13.0;
 
 class QuestionHomePage extends ConsumerStatefulWidget {
-  const QuestionHomePage({super.key});
+  const QuestionHomePage({super.key, this.tileProvider});
+
+  final TileProvider? tileProvider;
 
   @override
   ConsumerState<QuestionHomePage> createState() => _QuestionHomePageState();
@@ -34,15 +37,13 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
   double _questionSheetSize = _questionSheetInitialSize;
   String _searchQuery = '';
   String? _locationError;
+  int _cameraIntentRevision = 0;
 
   @override
   void initState() {
     super.initState();
     _mapController = MapController();
     _searchController = TextEditingController();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _refreshCurrentLocation(moveCamera: true);
-    });
   }
 
   @override
@@ -55,10 +56,14 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
   Future<DeviceCoordinates?> _refreshCurrentLocation({
     bool moveCamera = false,
   }) {
+    final cameraRevision = _cameraIntentRevision;
     final activeRequest = _currentLocationRequest;
     if (activeRequest != null) {
       return activeRequest.then((coordinates) {
-        if (moveCamera && coordinates != null && mounted) {
+        if (moveCamera &&
+            coordinates != null &&
+            mounted &&
+            cameraRevision == _cameraIntentRevision) {
           _moveMapToCoordinates(coordinates);
         }
         return coordinates;
@@ -77,6 +82,7 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
   Future<DeviceCoordinates?> _resolveCurrentLocation({
     required bool moveCamera,
   }) async {
+    final cameraRevision = _cameraIntentRevision;
     setState(() {
       _isResolvingLocation = true;
       _locationError = null;
@@ -90,7 +96,9 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
         _currentCoordinates = coordinates;
         if (shouldResetBounds) _visibleBounds = null;
       });
-      if (moveCamera) _moveMapToCoordinates(coordinates);
+      if (moveCamera && cameraRevision == _cameraIntentRevision) {
+        _moveMapToCoordinates(coordinates);
+      }
       return coordinates;
     } catch (error) {
       if (!mounted) return null;
@@ -102,10 +110,20 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
   }
 
   Future<void> _moveToCurrentLocation() async {
+    _cameraIntentRevision++;
     final coordinates = await _refreshCurrentLocation(moveCamera: true);
     if (!mounted || coordinates != null) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(_locationError ?? '현재 위치를 확인하지 못했습니다.')),
+    );
+  }
+
+  Future<void> _chooseMapCity() async {
+    final city = await showTravelCityPicker(context);
+    if (!mounted || city == null) return;
+    _cameraIntentRevision++;
+    _moveMapToCoordinates(
+      DeviceCoordinates(latitude: city.latitude, longitude: city.longitude),
     );
   }
 
@@ -164,8 +182,11 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
           Positioned.fill(
             child: _MapSurface(
               mapController: _mapController,
+              tileProvider: widget.tileProvider,
               questions: matchingItems,
               currentCoordinates: _currentCoordinates,
+              bottomPadding:
+                  MediaQuery.sizeOf(context).height * _questionSheetSize,
               onMapReady: _handleMapReady,
               onVisibleBoundsChanged: _handleVisibleBoundsChanged,
             ),
@@ -175,33 +196,35 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
             onSearchChanged: _handleSearchChanged,
             onClearSearch: _clearSearch,
             onSwitchRole: () => context.go('/helper/home'),
+            notices: _questionSheetSize > .55
+                ? const []
+                : [
+                    if (questions.hasError)
+                      _MapNotice(message: questions.error.toString()),
+                    if (_locationError != null)
+                      _MapNotice(
+                        message:
+                            '위치를 사용할 수 없어 전체 지도를 보여드려요. 질문할 지역은 직접 선택할 수 있어요.',
+                        detail: _locationError,
+                        icon: Icons.location_off_outlined,
+                      ),
+                    if (!questions.hasError &&
+                        _locationError == null &&
+                        items.any(
+                          (question) =>
+                              question.latitude == null ||
+                              question.longitude == null,
+                        ))
+                      const _MapNotice(message: '위치가 없는 이전 질문은 지도에 표시되지 않아요.'),
+                  ],
           ),
-          if (questions.hasError)
-            Positioned(
-              left: 16,
-              right: 16,
-              top: MediaQuery.paddingOf(context).top + 86,
-              child: _MapNotice(message: questions.error.toString()),
-            ),
-          if (!questions.hasError &&
-              items.any(
-                (question) =>
-                    question.latitude == null || question.longitude == null,
-              ))
-            const _NoCoordinateBanner(),
-          if (_locationError != null)
-            Positioned(
-              left: 16,
-              right: 16,
-              top: MediaQuery.paddingOf(context).top + 144,
-              child: _MapNotice(message: _locationError!),
-            ),
           Positioned.fill(
             child: _QuestionSheet(
               questions: visibleItems,
               isLoading: isLoading,
               searchQuery: _searchQuery,
               onSizeChanged: _handleQuestionSheetSizeChanged,
+              onCreateQuestion: () => context.go('/questions/new'),
             ),
           ),
           Positioned.fill(
@@ -210,25 +233,25 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
                 return Stack(
                   children: [
                     Positioned(
+                      left: 18,
+                      bottom: constraints.maxHeight * _questionSheetSize + 16,
+                      child: _CircleMapButton(
+                        tooltip: '여행할 도시 선택',
+                        icon: Icons.public_rounded,
+                        onTap: _chooseMapCity,
+                      ),
+                    ),
+                    Positioned(
                       right: 18,
                       bottom: constraints.maxHeight * _questionSheetSize + 16,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          _CircleMapButton(
-                            tooltip: '현재 위치로 이동',
-                            icon: _isResolvingLocation
-                                ? Icons.sync
-                                : Icons.my_location,
-                            onTap: _moveToCurrentLocation,
-                          ),
-                          const SizedBox(height: 12),
-                          _MapActionButton(
-                            tooltip: '질문하기',
-                            icon: Icons.add,
-                            onTap: () => context.go('/questions/new'),
-                          ),
-                        ],
+                      child: _CircleMapButton(
+                        tooltip: _isResolvingLocation
+                            ? '현재 위치 확인 중'
+                            : '현재 위치로 이동',
+                        icon: _isResolvingLocation
+                            ? Icons.sync_rounded
+                            : Icons.my_location_rounded,
+                        onTap: _moveToCurrentLocation,
                       ),
                     ),
                   ],
@@ -285,8 +308,8 @@ class _QuestionHomePageState extends ConsumerState<QuestionHomePage> {
 }
 
 String _mapIdentity(DeviceCoordinates? coordinates) {
-  if (coordinates == null) return 'spain-map';
-  return 'spain-map-${coordinates.latitude.toStringAsFixed(4)}-${coordinates.longitude.toStringAsFixed(4)}';
+  if (coordinates == null) return 'travel-map';
+  return 'travel-map-${coordinates.latitude.toStringAsFixed(4)}-${coordinates.longitude.toStringAsFixed(4)}';
 }
 
 List<Question> _searchQuestions(List<Question> questions, String query) {
@@ -294,7 +317,14 @@ List<Question> _searchQuestions(List<Question> questions, String query) {
   if (keyword.isEmpty) return questions;
 
   return questions.where((question) {
-    return question.title.toLowerCase().contains(keyword) ||
+    return question.country.toLowerCase().contains(keyword) ||
+        question.city.toLowerCase().contains(keyword) ||
+        (CityCatalog.findCity(
+              question.country,
+              question.city,
+            )?.cityKo.contains(keyword) ??
+            false) ||
+        question.title.toLowerCase().contains(keyword) ||
         question.body.toLowerCase().contains(keyword) ||
         question.answers.any(
           (answer) => answer.body.toLowerCase().contains(keyword),
@@ -368,80 +398,179 @@ class _MapTopBar extends StatelessWidget {
     required this.onSearchChanged,
     required this.onClearSearch,
     required this.onSwitchRole,
+    required this.notices,
   });
 
   final TextEditingController searchController;
   final ValueChanged<String> onSearchChanged;
   final VoidCallback onClearSearch;
   final VoidCallback onSwitchRole;
+  final List<Widget> notices;
 
   @override
   Widget build(BuildContext context) {
-    final padding = MediaQuery.paddingOf(context);
-
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final media = MediaQuery.of(context);
+    final compact = media.size.height - media.viewInsets.bottom < 600;
+    final menu = IconButton(
+      tooltip: '메뉴 열기',
+      onPressed: () => Scaffold.of(context).openDrawer(),
+      icon: const Icon(Icons.menu_rounded),
+      constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+    );
+    final search = _MapSearchField(
+      controller: searchController,
+      onChanged: onSearchChanged,
+      onClear: onClearSearch,
+      prefixAction: compact ? menu : null,
+      trailingAction: compact
+          ? IconButton(
+              tooltip: '답변자로 전환',
+              onPressed: onSwitchRole,
+              icon: const Icon(Icons.support_agent_rounded),
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+            )
+          : null,
+    );
     return Positioned(
       left: 16,
       right: 16,
-      top: padding.top + 12,
-      child: Row(
-        children: [
-          _CircleMapButton(
-            tooltip: '메뉴',
-            icon: Icons.menu,
-            onTap: () => Scaffold.of(context).openDrawer(),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Color(0x260B2B34),
-                    blurRadius: 22,
-                    offset: Offset(0, 8),
-                  ),
-                ],
-              ),
-              child: TextField(
-                controller: searchController,
-                onChanged: onSearchChanged,
-                textInputAction: TextInputAction.search,
-                decoration: InputDecoration(
-                  hintText: '무엇이 궁금하세요?',
-                  prefixIcon: const Icon(
-                    Icons.search,
-                    color: Color(0xFF13857E),
-                  ),
-                  suffixIcon: ValueListenableBuilder<TextEditingValue>(
-                    valueListenable: searchController,
-                    builder: (context, value, _) {
-                      if (value.text.isEmpty) return const SizedBox.shrink();
-                      return IconButton(
-                        tooltip: '검색어 지우기',
-                        onPressed: onClearSearch,
-                        icon: const Icon(Icons.close),
-                      );
-                    },
-                  ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 16),
+      top: media.padding.top + 12,
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 640),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Material(
+                color: scheme.surface,
+                borderRadius: BorderRadius.circular(24),
+                elevation: 4,
+                shadowColor: scheme.shadow.withValues(alpha: .10),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: compact
+                      ? search
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              children: [
+                                menu,
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    '여행 Q&A',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: theme.textTheme.titleLarge?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: -.7,
+                                    ),
+                                  ),
+                                ),
+                                Tooltip(
+                                  message: '답변자로 전환',
+                                  child: TextButton.icon(
+                                    onPressed: onSwitchRole,
+                                    icon: const Icon(
+                                      Icons.support_agent_rounded,
+                                      size: 19,
+                                    ),
+                                    label: const Text('답변하기'),
+                                    style: TextButton.styleFrom(
+                                      minimumSize: const Size(48, 48),
+                                      foregroundColor: scheme.onSurfaceVariant,
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            search,
+                          ],
+                        ),
                 ),
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
               ),
-            ),
+              for (final notice in notices)
+                Padding(padding: const EdgeInsets.only(top: 8), child: notice),
+            ],
           ),
-          const SizedBox(width: 10),
-          _CircleMapButton(
-            tooltip: '답변자로 전환',
-            icon: Icons.support_agent_outlined,
-            onTap: onSwitchRole,
-          ),
-        ],
+        ),
       ),
+    );
+  }
+}
+
+class _MapSearchField extends StatelessWidget {
+  const _MapSearchField({
+    required this.controller,
+    required this.onChanged,
+    required this.onClear,
+    this.prefixAction,
+    this.trailingAction,
+  });
+
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+  final Widget? prefixAction;
+  final Widget? trailingAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return TextField(
+      controller: controller,
+      onChanged: onChanged,
+      textInputAction: TextInputAction.search,
+      onTapOutside: (_) => FocusManager.instance.primaryFocus?.unfocus(),
+      decoration: InputDecoration(
+        hintText: '어떤 도움이 필요하세요?',
+        labelText: '질문 검색',
+        floatingLabelBehavior: FloatingLabelBehavior.never,
+        filled: true,
+        fillColor: scheme.surfaceContainerLow,
+        prefixIcon:
+            prefixAction ??
+            Icon(Icons.search_rounded, color: scheme.onSurfaceVariant),
+        suffixIcon: ValueListenableBuilder<TextEditingValue>(
+          valueListenable: controller,
+          builder: (context, value, _) {
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (value.text.isNotEmpty)
+                  IconButton(
+                    tooltip: '검색어 지우기',
+                    onPressed: onClear,
+                    icon: const Icon(Icons.cancel_rounded, size: 20),
+                  ),
+                if (trailingAction != null) trailingAction!,
+              ],
+            );
+          },
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 15,
+        ),
+      ),
+      style: theme.textTheme.bodyLarge,
     );
   }
 }
@@ -451,6 +580,8 @@ class _MapSurface extends StatelessWidget {
     required this.mapController,
     required this.questions,
     required this.currentCoordinates,
+    required this.bottomPadding,
+    required this.tileProvider,
     required this.onMapReady,
     required this.onVisibleBoundsChanged,
   });
@@ -458,6 +589,8 @@ class _MapSurface extends StatelessWidget {
   final MapController mapController;
   final List<Question> questions;
   final DeviceCoordinates? currentCoordinates;
+  final double bottomPadding;
+  final TileProvider? tileProvider;
   final _VisibleBoundsChanged onMapReady;
   final _VisibleBoundsChanged onVisibleBoundsChanged;
 
@@ -470,17 +603,11 @@ class _MapSurface extends StatelessWidget {
       mapController: mapController,
       options: MapOptions(
         initialCenter: currentCoordinates == null
-            ? const LatLng(SpainGeo.defaultLatitude, SpainGeo.defaultLongitude)
+            ? const LatLng(44.0, -35.0)
             : LatLng(currentCoordinates.latitude, currentCoordinates.longitude),
-        initialZoom: currentCoordinates == null ? 5.8 : _currentLocationZoom,
-        minZoom: 5,
+        initialZoom: currentCoordinates == null ? 2.0 : _currentLocationZoom,
+        minZoom: 2,
         maxZoom: 17,
-        cameraConstraint: CameraConstraint.containCenter(
-          bounds: LatLngBounds(
-            const LatLng(SpainGeo.minLatitude, SpainGeo.minLongitude),
-            const LatLng(SpainGeo.maxLatitude, SpainGeo.maxLongitude),
-          ),
-        ),
         interactionOptions: const InteractionOptions(
           flags:
               InteractiveFlag.drag |
@@ -499,6 +626,7 @@ class _MapSurface extends StatelessWidget {
       ),
       children: [
         TileLayer(
+          tileProvider: tileProvider,
           urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'local_qa_concierge',
         ),
@@ -521,6 +649,7 @@ class _MapSurface extends StatelessWidget {
               questions: questions,
               zoom: camera.zoom,
               visibleBounds: camera.visibleBounds,
+              markerTextScale: MediaQuery.textScalerOf(context).scale(22) / 22,
             );
             if (camera.zoom >= _questionClusterMaxZoom) {
               final locationMarker = _currentLocationMarker(currentCoordinates);
@@ -529,10 +658,14 @@ class _MapSurface extends StatelessWidget {
             return MarkerLayer(markers: markers);
           },
         ),
-        RichAttributionWidget(
-          attributions: [
-            TextSourceAttribution('OpenStreetMap contributors', onTap: () {}),
-          ],
+        Padding(
+          padding: EdgeInsets.only(bottom: bottomPadding + 16, left: 12),
+          child: RichAttributionWidget(
+            alignment: AttributionAlignment.bottomLeft,
+            attributions: [
+              TextSourceAttribution('OpenStreetMap contributors', onTap: () {}),
+            ],
+          ),
         ),
       ],
     );
@@ -544,6 +677,7 @@ List<Marker> _questionMarkersForZoom({
   required List<Question> questions,
   required double zoom,
   required LatLngBounds visibleBounds,
+  required double markerTextScale,
 }) {
   final visibleQuestions = questions.where((question) {
     final latitude = question.latitude;
@@ -557,6 +691,7 @@ List<Marker> _questionMarkersForZoom({
       mapController: mapController,
       questions: visibleQuestions,
       zoom: zoom,
+      markerTextScale: markerTextScale,
     );
   }
 
@@ -577,6 +712,7 @@ List<Marker> _clusteredQuestionMarkers({
   required MapController mapController,
   required List<Question> questions,
   required double zoom,
+  required double markerTextScale,
 }) {
   final buckets = <String, _QuestionClusterBucket>{};
   for (final question in questions) {
@@ -596,7 +732,9 @@ List<Marker> _clusteredQuestionMarkers({
 
   return buckets.values.map((bucket) {
     final center = bucket.center;
-    final markerSize = _clusterMarkerSize(bucket.count);
+    final markerSize =
+        _clusterMarkerSize(bucket.count) *
+        markerTextScale.clamp(1.0, double.infinity);
     return Marker(
       point: center,
       width: markerSize,
@@ -692,13 +830,16 @@ class _LocalizedMapLabel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = tier.foregroundColor;
+    final scheme = Theme.of(context).colorScheme;
+    final color = scheme.onSurface;
     return Center(
       child: DecoratedBox(
         decoration: BoxDecoration(
-          color: tier.backgroundColor,
+          color: scheme.surface.withValues(alpha: .94),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: tier.borderColor),
+          border: Border.all(
+            color: scheme.outlineVariant.withValues(alpha: .6),
+          ),
           boxShadow: const [
             BoxShadow(
               color: Color(0x22000000),
@@ -800,10 +941,10 @@ extension _LocalizedMapLabelTierStyle on _LocalizedMapLabelTier {
 
   FontWeight get fontWeight {
     return switch (this) {
-      _LocalizedMapLabelTier.country => FontWeight.w900,
-      _LocalizedMapLabelTier.region => FontWeight.w800,
-      _LocalizedMapLabelTier.city => FontWeight.w800,
-      _LocalizedMapLabelTier.local => FontWeight.w700,
+      _LocalizedMapLabelTier.country => FontWeight.w700,
+      _LocalizedMapLabelTier.region => FontWeight.w600,
+      _LocalizedMapLabelTier.city => FontWeight.w600,
+      _LocalizedMapLabelTier.local => FontWeight.w500,
     };
   }
 
@@ -827,291 +968,17 @@ extension _LocalizedMapLabelTierStyle on _LocalizedMapLabelTier {
       ),
     };
   }
-
-  Color get foregroundColor {
-    return switch (this) {
-      _LocalizedMapLabelTier.country => const Color(0xFF0F3D38),
-      _LocalizedMapLabelTier.region => const Color(0xFF34524D),
-      _LocalizedMapLabelTier.city => const Color(0xFF17211F),
-      _LocalizedMapLabelTier.local => const Color(0xFF45524F),
-    };
-  }
-
-  Color get backgroundColor {
-    return switch (this) {
-      _LocalizedMapLabelTier.country => const Color(0xF4E9FBF7),
-      _LocalizedMapLabelTier.region => const Color(0xEFFFFFFF),
-      _LocalizedMapLabelTier.city => const Color(0xEEFFFFFF),
-      _LocalizedMapLabelTier.local => const Color(0xDFFFFFFF),
-    };
-  }
-
-  Color get borderColor {
-    return switch (this) {
-      _LocalizedMapLabelTier.country => const Color(0x6610B6A5),
-      _LocalizedMapLabelTier.region => const Color(0x6692A9A3),
-      _LocalizedMapLabelTier.city => const Color(0x668FA49F),
-      _LocalizedMapLabelTier.local => const Color(0x558FA49F),
-    };
-  }
 }
 
-const _localizedMapPlaces = [
-  _LocalizedMapPlace(
-    latitude: 40.2,
-    longitude: -3.5,
-    tier: _LocalizedMapLabelTier.country,
-    labels: {'ko': '스페인', 'native': 'España'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 37.45,
-    longitude: -4.75,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '안달루시아', 'native': 'Andalucía'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 41.82,
-    longitude: 1.45,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '카탈루냐', 'native': 'Catalunya'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 39.45,
-    longitude: -0.72,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '발렌시아주', 'native': 'Comunitat Valenciana'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 39.58,
-    longitude: -3.0,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '카스티야라만차', 'native': 'Castilla-La Mancha'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 41.75,
-    longitude: -4.78,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '카스티야이레온', 'native': 'Castilla y León'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 42.82,
-    longitude: -7.9,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '갈리시아', 'native': 'Galicia'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 43.08,
-    longitude: -2.62,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '바스크', 'native': 'Euskadi'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 41.35,
-    longitude: -0.66,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '아라곤', 'native': 'Aragón'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 37.95,
-    longitude: -1.55,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '무르시아', 'native': 'Región de Murcia'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 39.05,
-    longitude: -6.25,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '엑스트레마두라', 'native': 'Extremadura'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 43.35,
-    longitude: -5.9,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '아스투리아스', 'native': 'Asturias'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 39.6,
-    longitude: 2.92,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '발레아레스 제도', 'native': 'Illes Balears'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 28.35,
-    longitude: -15.9,
-    tier: _LocalizedMapLabelTier.region,
-    labels: {'ko': '카나리아 제도', 'native': 'Canarias'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 40.4168,
-    longitude: -3.7038,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '마드리드', 'native': 'Madrid'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 41.3874,
-    longitude: 2.1686,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '바르셀로나', 'native': 'Barcelona'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 39.4699,
-    longitude: -0.3763,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '발렌시아', 'native': 'Valencia'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 37.3891,
-    longitude: -5.9845,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '세비야', 'native': 'Sevilla'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 41.6488,
-    longitude: -0.8891,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '사라고사', 'native': 'Zaragoza'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.7213,
-    longitude: -4.4214,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '말라가', 'native': 'Málaga'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 37.9922,
-    longitude: -1.1307,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '무르시아', 'native': 'Murcia'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 39.5696,
-    longitude: 2.6502,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '팔마', 'native': 'Palma'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 43.263,
-    longitude: -2.935,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '빌바오', 'native': 'Bilbao'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 38.3452,
-    longitude: -0.481,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '알리칸테', 'native': 'Alicante'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 37.8882,
-    longitude: -4.7794,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '코르도바', 'native': 'Córdoba'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 37.1773,
-    longitude: -3.5986,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '그라나다', 'native': 'Granada'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.5297,
-    longitude: -6.2926,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '카디스', 'native': 'Cádiz'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.834,
-    longitude: -2.4637,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '알메리아', 'native': 'Almería'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 37.7796,
-    longitude: -3.7849,
-    tier: _LocalizedMapLabelTier.city,
-    labels: {'ko': '하엔', 'native': 'Jaén'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.5101,
-    longitude: -4.8824,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '마르베야', 'native': 'Marbella'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.5988,
-    longitude: -4.5168,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '토레몰리노스', 'native': 'Torremolinos'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.5966,
-    longitude: -4.5727,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '베날마데나', 'native': 'Benalmádena'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.539,
-    longitude: -4.6244,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '푸엔히롤라', 'native': 'Fuengirola'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.596,
-    longitude: -4.6373,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '미하스', 'native': 'Mijas'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.7465,
-    longitude: -3.8794,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '네르하', 'native': 'Nerja'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.7726,
-    longitude: -4.1005,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '벨레스말라가', 'native': 'Vélez-Málaga'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.7169,
-    longitude: -4.2806,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '린콘 데 라 빅토리아', 'native': 'Rincón de la Victoria'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.4256,
-    longitude: -5.151,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '에스테포나', 'native': 'Estepona'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 37.0194,
-    longitude: -4.5612,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '안테케라', 'native': 'Antequera'},
-  ),
-  _LocalizedMapPlace(
-    latitude: 36.7462,
-    longitude: -5.1612,
-    tier: _LocalizedMapLabelTier.local,
-    labels: {'ko': '론다', 'native': 'Ronda'},
-  ),
+final _localizedMapPlaces = [
+  for (final city in CityCatalog.knownPlaces)
+    _LocalizedMapPlace(
+      latitude: city.latitude,
+      longitude: city.longitude,
+      tier: _LocalizedMapLabelTier.city,
+      labels: {'ko': city.cityKo, 'native': city.nativeName},
+    ),
 ];
-
-class _NoCoordinateBanner extends StatelessWidget {
-  const _NoCoordinateBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned(
-      left: 16,
-      right: 16,
-      top: MediaQuery.paddingOf(context).top + 86,
-      child: const _MapNotice(message: '이전 질문에는 좌표가 없어 지도 핀이 표시되지 않을 수 있습니다.'),
-    );
-  }
-}
 
 class _QuestionClusterMarker extends StatelessWidget {
   const _QuestionClusterMarker({required this.count, required this.onTap});
@@ -1121,52 +988,57 @@ class _QuestionClusterMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final displayCount = count > 99 ? '99+' : '$count';
 
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: onTap,
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFF0F766E),
-            border: Border.all(color: Colors.white, width: 4),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x330B2B34),
-                blurRadius: 14,
-                offset: Offset(0, 5),
-              ),
-            ],
-          ),
-          child: Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  displayCount,
-                  maxLines: 1,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                    height: 1,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                const Text(
-                  '질문',
-                  maxLines: 1,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    height: 1,
-                  ),
+    return Semantics(
+      label: '$count개 질문이 있는 지역 확대',
+      button: true,
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: onTap,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: scheme.primary,
+              border: Border.all(color: scheme.surface, width: 3),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x330B2B34),
+                  blurRadius: 14,
+                  offset: Offset(0, 5),
                 ),
               ],
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    displayCount,
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: scheme.onPrimary,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      height: 1,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '질문',
+                    maxLines: 1,
+                    style: TextStyle(
+                      color: scheme.onPrimary,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                      height: 1,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -1184,36 +1056,46 @@ class _QuestionPin extends StatelessWidget {
   Widget build(BuildContext context) {
     final style = _QuestionCategoryStyle.forCategory(question.category);
 
-    return Align(
-      alignment: Alignment.bottomCenter,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(20),
-        onTap: () => context.go('/questions/${question.id}'),
-        child: CustomPaint(
-          painter: _QuestionBubblePainter(accentColor: style.color),
-          child: SizedBox(
-            width: 104,
-            height: 56,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 7, 12, 18),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(style.icon, size: 18, color: style.color),
-                  const SizedBox(width: 5),
-                  Flexible(
-                    child: Text(
-                      formatPoints(question.rewardPoints),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                        color: const Color(0xFF17211F),
-                        fontWeight: FontWeight.w900,
+    return Tooltip(
+      message: question.title,
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => context.go('/questions/${question.id}'),
+          child: CustomPaint(
+            painter: _QuestionBubblePainter(
+              accentColor: Theme.of(context).colorScheme.primary,
+              surfaceColor: Theme.of(context).colorScheme.surface,
+            ),
+            child: SizedBox(
+              width: 104,
+              height: 56,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 7, 12, 18),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      style.icon,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        formatPoints(question.rewardPoints),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurface,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
@@ -1224,42 +1106,22 @@ class _QuestionPin extends StatelessWidget {
 }
 
 class _QuestionCategoryStyle {
-  const _QuestionCategoryStyle({required this.icon, required this.color});
+  const _QuestionCategoryStyle({required this.icon});
 
   final IconData icon;
-  final Color color;
 
   static _QuestionCategoryStyle forCategory(String category) {
-    return switch (category) {
-      '교통' => const _QuestionCategoryStyle(
-        icon: Icons.directions_bus_filled_outlined,
-        color: Color(0xFF2563EB),
-      ),
-      '번역' => const _QuestionCategoryStyle(
-        icon: Icons.translate,
-        color: Color(0xFF7C3AED),
-      ),
-      '생활' => const _QuestionCategoryStyle(
-        icon: Icons.home_repair_service_outlined,
-        color: Color(0xFF0F766E),
-      ),
-      '쇼핑' => const _QuestionCategoryStyle(
-        icon: Icons.shopping_bag_outlined,
-        color: Color(0xFFD97706),
-      ),
-      '식당' => const _QuestionCategoryStyle(
-        icon: Icons.restaurant_menu,
-        color: Color(0xFFDC2626),
-      ),
-      '긴급도움' => const _QuestionCategoryStyle(
-        icon: Icons.sos_outlined,
-        color: Color(0xFFE11D48),
-      ),
-      _ => const _QuestionCategoryStyle(
-        icon: Icons.help_outline,
-        color: Color(0xFF10B6A5),
-      ),
-    };
+    return _QuestionCategoryStyle(
+      icon: switch (category) {
+        '교통' => Icons.directions_bus_filled_outlined,
+        '번역' => Icons.translate,
+        '생활' => Icons.home_repair_service_outlined,
+        '쇼핑' => Icons.shopping_bag_outlined,
+        '식당' => Icons.restaurant_menu,
+        '긴급도움' => Icons.sos_outlined,
+        _ => Icons.help_outline,
+      },
+    );
   }
 }
 
@@ -1268,40 +1130,47 @@ class _CurrentLocationMarker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        Container(
-          width: 58,
-          height: 58,
-          decoration: BoxDecoration(
-            color: const Color(0x333B82F6),
-            shape: BoxShape.circle,
-            border: Border.all(color: const Color(0x553B82F6), width: 1.5),
-          ),
-        ),
-        Container(
-          width: 22,
-          height: 22,
-          decoration: BoxDecoration(
-            color: const Color(0xFF2563EB),
-            shape: BoxShape.circle,
-            border: Border.all(color: Colors.white, width: 4),
-            boxShadow: const [
-              BoxShadow(
-                color: Color(0x442563EB),
-                blurRadius: 14,
-                offset: Offset(0, 4),
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      label: '현재 위치',
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: 58,
+            height: 58,
+            decoration: BoxDecoration(
+              color: scheme.primary.withValues(alpha: .16),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: scheme.primary.withValues(alpha: .25),
+                width: 1.5,
               ),
-            ],
+            ),
           ),
-        ),
-      ],
+          Container(
+            width: 22,
+            height: 22,
+            decoration: BoxDecoration(
+              color: scheme.primary,
+              shape: BoxShape.circle,
+              border: Border.all(color: scheme.surface, width: 4),
+              boxShadow: [
+                BoxShadow(
+                  color: scheme.primary.withValues(alpha: .18),
+                  blurRadius: 14,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
 
-const _questionSheetInitialSize = .28;
+const _questionSheetInitialSize = .34;
 const _questionSheetMinSize = .20;
 const _questionSheetMaxSize = .68;
 
@@ -1311,12 +1180,14 @@ class _QuestionSheet extends StatefulWidget {
     required this.isLoading,
     required this.searchQuery,
     required this.onSizeChanged,
+    required this.onCreateQuestion,
   });
 
   final List<Question> questions;
   final bool isLoading;
   final String searchQuery;
   final ValueChanged<double> onSizeChanged;
+  final VoidCallback onCreateQuestion;
 
   @override
   State<_QuestionSheet> createState() => _QuestionSheetState();
@@ -1353,8 +1224,21 @@ class _QuestionSheetState extends State<_QuestionSheet> {
     _sheetController.jumpTo(nextSize);
   }
 
+  void _toggleExpanded() {
+    if (!_sheetController.isAttached) return;
+    final target = _sheetController.size > .45
+        ? _questionSheetInitialSize
+        : _questionSheetMaxSize;
+    _sheetController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return LayoutBuilder(
       builder: (context, constraints) {
         return DraggableScrollableSheet(
@@ -1363,44 +1247,93 @@ class _QuestionSheetState extends State<_QuestionSheet> {
           minChildSize: _questionSheetMinSize,
           maxChildSize: _questionSheetMaxSize,
           builder: (context, controller) {
-            return DecoratedBox(
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
-                boxShadow: [
-                  BoxShadow(
-                    color: Color(0x300B2B34),
-                    blurRadius: 26,
-                    offset: Offset(0, -8),
-                  ),
-                ],
+            final header = Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 16, 16),
+              child: _SheetHeader(
+                count: widget.questions.length,
+                searchQuery: widget.searchQuery,
+                isLoading: widget.isLoading,
+                onCreateQuestion: widget.onCreateQuestion,
               ),
-              child: ListView(
-                controller: controller,
-                padding: const EdgeInsets.fromLTRB(18, 6, 18, 28),
-                children: [
-                  _QuestionSheetDragHandle(
-                    onDragUpdate: (details) {
-                      _handleDragUpdate(details, constraints.maxHeight);
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  _SheetHeader(
-                    count: widget.questions.length,
+            );
+            final handle = _QuestionSheetDragHandle(
+              onTap: _toggleExpanded,
+              onDragUpdate: (details) {
+                _handleDragUpdate(details, constraints.maxHeight);
+              },
+            );
+            final items = <Widget>[
+              if (widget.isLoading)
+                const _SheetLoading()
+              else if (widget.questions.isEmpty)
+                _EmptyMapState(searchQuery: widget.searchQuery)
+              else
+                for (final question in widget.questions)
+                  _NearbyQuestionTile(
+                    question: question,
                     searchQuery: widget.searchQuery,
                   ),
-                  const SizedBox(height: 14),
-                  if (widget.isLoading)
-                    const _SheetLoading()
-                  else if (widget.questions.isEmpty)
-                    _EmptyMapState(searchQuery: widget.searchQuery)
-                  else
-                    for (final question in widget.questions)
-                      _NearbyQuestionTile(
-                        question: question,
-                        searchQuery: widget.searchQuery,
-                      ),
-                ],
+            ];
+            return Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 760),
+                child: Material(
+                  color: scheme.surface,
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(28),
+                  ),
+                  clipBehavior: Clip.antiAlias,
+                  elevation: 8,
+                  shadowColor: scheme.shadow.withValues(alpha: .10),
+                  child: LayoutBuilder(
+                    builder: (context, sheetConstraints) {
+                      // A scrollable header keeps all actions reachable when the
+                      // keyboard or a landscape viewport leaves little height.
+                      if (sheetConstraints.maxHeight < 170 ||
+                          MediaQuery.textScalerOf(context).scale(16) > 22) {
+                        return ListView(
+                          controller: controller,
+                          padding: EdgeInsets.only(
+                            bottom: MediaQuery.paddingOf(context).bottom + 20,
+                          ),
+                          children: [
+                            handle,
+                            header,
+                            for (final item in items)
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                child: item,
+                              ),
+                          ],
+                        );
+                      }
+                      return Column(
+                        children: [
+                          handle,
+                          header,
+                          Divider(
+                            height: 1,
+                            color: scheme.outlineVariant.withValues(alpha: .55),
+                          ),
+                          Expanded(
+                            child: ListView(
+                              controller: controller,
+                              padding: EdgeInsets.fromLTRB(
+                                16,
+                                12,
+                                16,
+                                MediaQuery.paddingOf(context).bottom + 20,
+                              ),
+                              children: items,
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
               ),
             );
           },
@@ -1411,28 +1344,39 @@ class _QuestionSheetState extends State<_QuestionSheet> {
 }
 
 class _QuestionSheetDragHandle extends StatelessWidget {
-  const _QuestionSheetDragHandle({required this.onDragUpdate});
+  const _QuestionSheetDragHandle({
+    required this.onDragUpdate,
+    required this.onTap,
+  });
 
   final GestureDragUpdateCallback onDragUpdate;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Semantics(
-      label: '질문 목록 크기 조절',
-      child: MouseRegion(
-        cursor: SystemMouseCursors.resizeUpDown,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onVerticalDragUpdate: onDragUpdate,
-          child: SizedBox(
-            height: 30,
-            child: Center(
-              child: Container(
-                width: 70,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFD8E2DF),
-                  borderRadius: BorderRadius.circular(8),
+      label: '질문 목록 펼치기 또는 접기',
+      button: true,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onVerticalDragUpdate: onDragUpdate,
+        child: Tooltip(
+          message: '질문 목록 펼치기 또는 접기',
+          child: InkWell(
+            onTap: onTap,
+            child: SizedBox(
+              width: double.infinity,
+              height: 48,
+              child: Center(
+                child: Container(
+                  width: 36,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurfaceVariant.withValues(alpha: .3),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
                 ),
               ),
             ),
@@ -1444,27 +1388,67 @@ class _QuestionSheetDragHandle extends StatelessWidget {
 }
 
 class _SheetHeader extends StatelessWidget {
-  const _SheetHeader({required this.count, required this.searchQuery});
+  const _SheetHeader({
+    required this.count,
+    required this.searchQuery,
+    required this.isLoading,
+    required this.onCreateQuestion,
+  });
 
   final int count;
   final String searchQuery;
+  final bool isLoading;
+  final VoidCallback onCreateQuestion;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final theme = Theme.of(context);
+    final heading = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          searchQuery.trim().isEmpty
-              ? '현재 화면 · $count개 질문'
-              : '현재 화면 · 검색 결과 $count개',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF60726F)),
+          searchQuery.trim().isEmpty ? '이 지역의 질문' : '검색 결과',
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+            letterSpacing: -.5,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          isLoading ? '주변 질문을 살펴보는 중' : '현재 지도에서 $count개',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
+    );
+    final action = FilledButton.icon(
+      onPressed: onCreateQuestion,
+      icon: const Icon(Icons.add_rounded, size: 20),
+      label: const Text('질문하기'),
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+    );
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 440 &&
+            MediaQuery.textScalerOf(context).scale(16) > 20) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [action, const SizedBox(height: 12), heading],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: heading),
+            const SizedBox(width: 12),
+            action,
+          ],
+        );
+      },
     );
   }
 }
@@ -1477,107 +1461,109 @@ class _NearbyQuestionTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final category = _QuestionCategoryStyle.forCategory(question.category);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
-        color: const Color(0xFFF7FAF9),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: Color(0xFFE1EAE7)),
-        ),
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(20),
         child: InkWell(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(20),
           onTap: () => context.go('/questions/${question.id}'),
           child: Padding(
-            padding: const EdgeInsets.all(14),
-            child: Row(
+            padding: const EdgeInsets.all(16),
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                SizedBox(
-                  width: 22,
-                  height: 24,
-                  child: Icon(
-                    question.isOpen
-                        ? Icons.chat_bubble_outline
-                        : Icons.route_outlined,
-                    size: 20,
-                    color: question.isOpen
-                        ? const Color(0xFF008E7C)
-                        : const Color(0xFFD48100),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: _HighlightedText(
-                              text: question.title,
-                              query: searchQuery,
-                              maxLines: 1,
-                              style: Theme.of(context).textTheme.titleMedium
-                                  ?.copyWith(fontWeight: FontWeight.w800),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            formatPoints(question.rewardPoints),
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(
-                                  color: scheme.primary,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                          ),
-                        ],
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        color: scheme.surface,
+                        borderRadius: BorderRadius.circular(12),
                       ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          StatusChip(
-                            label: question.status,
-                            emphasis: question.isOpen,
-                            compact: true,
-                          ),
-                          const SizedBox(width: 6),
-                          StatusChip(label: question.urgency, compact: true),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              question.locationLabel,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(color: const Color(0xFF60726F)),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            formatDate(question.createdAt),
-                            style: Theme.of(context).textTheme.labelSmall
-                                ?.copyWith(color: const Color(0xFF60726F)),
-                          ),
-                        ],
+                      child: Icon(
+                        category.icon,
+                        size: 20,
+                        color: scheme.primary,
                       ),
-                      if (_matchingSnippet(question, searchQuery)
-                          case final snippet?) ...[
-                        const SizedBox(height: 4),
-                        _HighlightedText(
-                          text: '${snippet.label} · ${snippet.text}',
-                          query: searchQuery,
-                          maxLines: 2,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(color: const Color(0xFF455653)),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _HighlightedText(
+                        text: question.title,
+                        query: searchQuery,
+                        maxLines: 2,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                          height: 1.4,
+                          letterSpacing: -.2,
                         ),
-                      ],
-                    ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      size: 20,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    StatusChip(
+                      label: question.status,
+                      emphasis: question.isOpen,
+                      compact: true,
+                    ),
+                    StatusChip(label: question.urgency, compact: true),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      child: Text(
+                        formatPoints(question.rewardPoints),
+                        semanticsLabel:
+                            '질문 보상 ${formatPoints(question.rewardPoints)}',
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '${question.locationLabel} · ${formatDate(question.createdAt)}',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    height: 1.4,
                   ),
                 ),
+                if (_matchingSnippet(question, searchQuery)
+                    case final snippet?) ...[
+                  const SizedBox(height: 10),
+                  _HighlightedText(
+                    text: '${snippet.label} · ${snippet.text}',
+                    query: searchQuery,
+                    maxLines: 2,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      height: 1.4,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1634,10 +1620,10 @@ class _HighlightedText extends StatelessWidget {
       spans.add(
         TextSpan(
           text: text.substring(match.start, match.end),
-          style: const TextStyle(
-            color: Color(0xFF005F57),
-            backgroundColor: Color(0xFF9FF4E8),
-            fontWeight: FontWeight.w900,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onPrimaryContainer,
+            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+            fontWeight: FontWeight.w700,
           ),
         ),
       );
@@ -1656,41 +1642,46 @@ class _HighlightedText extends StatelessWidget {
 }
 
 class _MapNotice extends StatelessWidget {
-  const _MapNotice({required this.message});
+  const _MapNotice({
+    required this.message,
+    this.detail,
+    this.icon = Icons.info_outline_rounded,
+  });
 
   final String message;
+  final String? detail;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x220B2B34),
-            blurRadius: 18,
-            offset: Offset(0, 7),
-          ),
-        ],
-      ),
+    final theme = Theme.of(context);
+    final content = Material(
+      color: theme.colorScheme.surface,
+      borderRadius: BorderRadius.circular(18),
+      elevation: 2,
+      shadowColor: theme.colorScheme.shadow.withValues(alpha: .06),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: [
-            const Icon(Icons.info_outline, color: Color(0xFFE06F4F)),
+            Icon(icon, size: 20, color: theme.colorScheme.onSurfaceVariant),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
                 message,
-                maxLines: 2,
+                maxLines: 3,
                 overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.4,
+                ),
               ),
             ),
           ],
         ),
       ),
     );
+    return detail == null ? content : Tooltip(message: detail!, child: content);
   }
 }
 
@@ -1699,9 +1690,18 @@ class _SheetLoading extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Padding(
-      padding: EdgeInsets.symmetric(vertical: 28),
-      child: Center(child: CircularProgressIndicator()),
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 28),
+      child: Center(
+        child: SizedBox.square(
+          dimension: 24,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            semanticsLabel: '주변 질문 불러오는 중',
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1713,33 +1713,34 @@ class _EmptyMapState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 28),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       child: Column(
         children: [
-          const Icon(
+          Icon(
             Icons.explore_outlined,
-            size: 44,
-            color: Color(0xFF10B6A5),
+            size: 32,
+            color: theme.colorScheme.onSurfaceVariant,
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 12),
           Text(
-            searchQuery.trim().isEmpty
-                ? '현재 지도 화면에 질문이 없습니다'
-                : '현재 지도 화면에 검색 결과가 없습니다',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
+            searchQuery.trim().isEmpty ? '아직 이 지역의 질문이 없어요' : '일치하는 질문이 없어요',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
             searchQuery.trim().isEmpty
-                ? '지도를 움직이거나 확대/축소해서 다른 지역 질문을 찾아보세요.'
-                : '다른 검색어를 입력하거나 지도를 움직여 보세요.',
+                ? '지도를 움직여 둘러보거나, 궁금한 것을 먼저 물어보세요.'
+                : '검색어를 바꾸거나 다른 지역을 살펴보세요.',
             textAlign: TextAlign.center,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: const Color(0xFF60726F)),
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              height: 1.5,
+            ),
           ),
         ],
       ),
@@ -1760,54 +1761,31 @@ class _CircleMapButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     return Material(
-      color: Colors.white,
-      shape: const CircleBorder(),
-      elevation: 6,
-      shadowColor: const Color(0x260B2B34),
-      child: IconButton(tooltip: tooltip, onPressed: onTap, icon: Icon(icon)),
-    );
-  }
-}
-
-class _MapActionButton extends StatelessWidget {
-  const _MapActionButton({
-    required this.tooltip,
-    required this.icon,
-    required this.onTap,
-  });
-
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: const Color(0xFF10D7C3),
-        elevation: 4,
-        shadowColor: const Color(0x330B2B34),
-        shape: const CircleBorder(),
-        child: InkWell(
-          onTap: onTap,
-          customBorder: const CircleBorder(),
-          child: SizedBox(
-            width: 42,
-            height: 42,
-            child: Icon(icon, size: 21, color: const Color(0xFF042B30)),
-          ),
-        ),
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(16),
+      elevation: 3,
+      shadowColor: scheme.shadow.withValues(alpha: .10),
+      child: IconButton(
+        tooltip: tooltip,
+        onPressed: onTap,
+        color: scheme.primary,
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        icon: Icon(icon, size: 22),
       ),
     );
   }
 }
 
 class _QuestionBubblePainter extends CustomPainter {
-  const _QuestionBubblePainter({required this.accentColor});
+  const _QuestionBubblePainter({
+    required this.accentColor,
+    required this.surfaceColor,
+  });
 
   final Color accentColor;
+  final Color surfaceColor;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1846,19 +1824,20 @@ class _QuestionBubblePainter extends CustomPainter {
     canvas.drawShadow(path, const Color(0x330B2B34), 8, true);
 
     final fill = Paint()
-      ..color = Colors.white
+      ..color = surfaceColor
       ..style = PaintingStyle.fill;
     canvas.drawPath(path, fill);
 
     final stroke = Paint()
       ..color = accentColor
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 2;
+      ..strokeWidth = 1.5;
     canvas.drawPath(path, stroke);
   }
 
   @override
   bool shouldRepaint(covariant _QuestionBubblePainter oldDelegate) {
-    return oldDelegate.accentColor != accentColor;
+    return oldDelegate.accentColor != accentColor ||
+        oldDelegate.surfaceColor != surfaceColor;
   }
 }

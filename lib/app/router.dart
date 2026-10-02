@@ -1,10 +1,19 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../shared/models/app_user.dart';
 import '../features/admin/admin_helper_applications_page.dart';
 import '../features/admin/admin_home_page.dart';
+import '../features/admin/admin_reports_page.dart';
+import '../features/account/account_settings_page.dart';
+import '../features/auth/password_recovery_page.dart';
+import '../features/auth/email_verification_page.dart';
+import '../features/safety/blocked_users_page.dart';
+import '../features/safety/app_info_page.dart';
 import '../features/answers/answer_form_page.dart';
 import '../features/auth/auth_page.dart';
+import '../features/auth/auth_repository.dart';
+import '../features/auth/session_scope.dart';
 import '../features/auth/splash_page.dart';
 import '../features/helper_application/helper_application_page.dart';
 import '../features/helper_application/helper_home_page.dart';
@@ -16,11 +25,50 @@ import '../features/questions/question_detail_page.dart';
 import '../features/questions/question_home_page.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
-  return GoRouter(
+  final auth = ref.watch(authRepositoryProvider);
+  var userId = auth.currentUser?.id;
+  void onSessionChange() {
+    if (userId == auth.currentUser?.id) return;
+    userId = auth.currentUser?.id;
+    invalidateSessionScopedProvidersForRef(ref);
+  }
+
+  auth.addListener(onSessionChange);
+  ref.onDispose(() => auth.removeListener(onSessionChange));
+  final router = GoRouter(
+    refreshListenable: auth,
+    redirect: (context, state) {
+      return authRedirect(
+        initialized: auth.initialized,
+        user: auth.currentUser,
+        location: state.matchedLocation,
+      );
+    },
     initialLocation: '/',
     routes: [
       GoRoute(path: '/', builder: (context, state) => const SplashPage()),
       GoRoute(path: '/auth', builder: (context, state) => const AuthPage()),
+      GoRoute(
+        path: '/auth/recovery',
+        builder: (context, state) => const PasswordRecoveryPage(),
+      ),
+      GoRoute(path: '/about', builder: (context, state) => const AppInfoPage()),
+      GoRoute(
+        path: '/account',
+        builder: (context, state) => const AccountSettingsPage(),
+      ),
+      GoRoute(
+        path: '/account/verify',
+        builder: (context, state) => const EmailVerificationPage(),
+      ),
+      GoRoute(
+        path: '/account/blocked',
+        builder: (context, state) => const BlockedUsersPage(),
+      ),
+      GoRoute(
+        path: '/admin/reports',
+        builder: (context, state) => const AdminReportsPage(),
+      ),
       GoRoute(
         path: '/home',
         builder: (context, state) => const QuestionHomePage(),
@@ -69,4 +117,27 @@ final routerProvider = Provider<GoRouter>((ref) {
       ),
     ],
   );
+  ref.onDispose(router.dispose);
+  return router;
 });
+
+String? authRedirect({
+  required bool initialized,
+  required AppUser? user,
+  required String location,
+}) {
+  if (!initialized) return location == '/' ? null : '/';
+  if (user == null) {
+    return const ['/auth', '/auth/recovery', '/about'].contains(location)
+        ? null
+        : '/auth';
+  }
+  if (user.isSuspended &&
+      !location.startsWith('/account') &&
+      !const ['/about', '/profile', '/points'].contains(location)) {
+    return '/account';
+  }
+  if (location == '/auth' || location == '/') return '/home';
+  if (location.startsWith('/admin') && !user.isAdmin) return '/home';
+  return null;
+}

@@ -25,7 +25,9 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>현재 위치를 기준으로 질문 지역을 자동 입력합니다.</string>
+	<string>현재 위치를 눌렀을 때 주변 지도를 표시하고 질문 지역을 입력합니다. 질문을 등록하면 선택한 위치가 서버에 저장되어 답변할 가이드에게 표시됩니다. 직접 지역을 선택할 수도 있습니다.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>질문에 첨부할 사진을 선택합니다. 질문을 등록하면 선택한 사진이 서버에 저장되어 답변할 가이드에게 표시됩니다.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

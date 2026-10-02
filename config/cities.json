@@ -1,0 +1,522 @@
+{
+  "schemaVersion": 1,
+  "coverageStatus": "proposed",
+  "availabilityGuaranteed": false,
+  "associationMaxDistanceKm": 60,
+  "note": "Editable proposed catalog for a virtual-points demo. Listed places and center coordinates are selection/association aids, not approved launch coverage, geographic service boundaries, or evidence of guide availability.",
+  "cities": [
+    {
+      "id": "gb-london",
+      "countryCode": "GB",
+      "country": "United Kingdom",
+      "countryKo": "영국",
+      "city": "London",
+      "cityKo": "런던",
+      "nativeName": "London",
+      "countryAliases": [
+        "UK",
+        "U.K.",
+        "GB",
+        "GBR",
+        "Great Britain",
+        "Britain",
+        "England",
+        "United Kingdom of Great Britain and Northern Ireland",
+        "영국"
+      ],
+      "aliases": [
+        "London",
+        "런던"
+      ],
+      "latitude": 51.5074,
+      "longitude": -0.1278,
+      "legacyDemo": false
+    },
+    {
+      "id": "fr-paris",
+      "countryCode": "FR",
+      "country": "France",
+      "countryKo": "프랑스",
+      "city": "Paris",
+      "cityKo": "파리",
+      "nativeName": "Paris",
+      "countryAliases": [
+        "FR",
+        "FRA",
+        "France",
+        "프랑스"
+      ],
+      "aliases": [
+        "Paris",
+        "파리"
+      ],
+      "latitude": 48.8566,
+      "longitude": 2.3522,
+      "legacyDemo": false
+    },
+    {
+      "id": "it-rome",
+      "countryCode": "IT",
+      "country": "Italy",
+      "countryKo": "이탈리아",
+      "city": "Rome",
+      "cityKo": "로마",
+      "nativeName": "Roma",
+      "countryAliases": [
+        "IT",
+        "ITA",
+        "Italia",
+        "Italy",
+        "이탈리아"
+      ],
+      "aliases": [
+        "Rome",
+        "로마",
+        "Roma"
+      ],
+      "latitude": 41.9028,
+      "longitude": 12.4964,
+      "legacyDemo": false
+    },
+    {
+      "id": "nl-amsterdam",
+      "countryCode": "NL",
+      "country": "Netherlands",
+      "countryKo": "네덜란드",
+      "city": "Amsterdam",
+      "cityKo": "암스테르담",
+      "nativeName": "Amsterdam",
+      "countryAliases": [
+        "NL",
+        "NLD",
+        "The Netherlands",
+        "Nederland",
+        "Holland",
+        "Netherlands",
+        "네덜란드"
+      ],
+      "aliases": [
+        "Amsterdam",
+        "암스테르담"
+      ],
+      "latitude": 52.3676,
+      "longitude": 4.9041,
+      "legacyDemo": false
+    },
+    {
+      "id": "de-berlin",
+      "countryCode": "DE",
+      "country": "Germany",
+      "countryKo": "독일",
+      "city": "Berlin",
+      "cityKo": "베를린",
+      "nativeName": "Berlin",
+      "countryAliases": [
+        "DE",
+        "DEU",
+        "Deutschland",
+        "Germany",
+        "독일"
+      ],
+      "aliases": [
+        "Berlin",
+        "베를린"
+      ],
+      "latitude": 52.52,
+      "longitude": 13.405,
+      "legacyDemo": false
+    },
+    {
+      "id": "pt-lisbon",
+      "countryCode": "PT",
+      "country": "Portugal",
+      "countryKo": "포르투갈",
+      "city": "Lisbon",
+      "cityKo": "리스본",
+      "nativeName": "Lisboa",
+      "countryAliases": [
+        "PT",
+        "PRT",
+        "Portugal",
+        "포르투갈"
+      ],
+      "aliases": [
+        "Lisbon",
+        "리스본",
+        "Lisboa"
+      ],
+      "latitude": 38.7223,
+      "longitude": -9.1393,
+      "legacyDemo": false
+    },
+    {
+      "id": "es-barcelona",
+      "countryCode": "ES",
+      "country": "Spain",
+      "countryKo": "스페인",
+      "city": "Barcelona",
+      "cityKo": "바르셀로나",
+      "nativeName": "Barcelona",
+      "countryAliases": [
+        "ES",
+        "ESP",
+        "España",
+        "Espana",
+        "Spain",
+        "스페인"
+      ],
+      "aliases": [
+        "Barcelona",
+        "바르셀로나"
+      ],
+      "latitude": 41.3874,
+      "longitude": 2.1686,
+      "legacyDemo": false
+    },
+    {
+      "id": "es-madrid",
+      "countryCode": "ES",
+      "country": "Spain",
+      "countryKo": "스페인",
+      "city": "Madrid",
+      "cityKo": "마드리드",
+      "nativeName": "Madrid",
+      "countryAliases": [
+        "ES",
+        "ESP",
+        "España",
+        "Espana",
+        "Spain",
+        "스페인"
+      ],
+      "aliases": [
+        "Madrid",
+        "마드리드"
+      ],
+      "latitude": 40.4168,
+      "longitude": -3.7038,
+      "legacyDemo": false
+    },
+    {
+      "id": "cz-prague",
+      "countryCode": "CZ",
+      "country": "Czechia",
+      "countryKo": "체코",
+      "city": "Prague",
+      "cityKo": "프라하",
+      "nativeName": "Praha",
+      "countryAliases": [
+        "CZ",
+        "CZE",
+        "Czech Republic",
+        "Česko",
+        "Czechia",
+        "체코",
+        "체코공화국"
+      ],
+      "aliases": [
+        "Prague",
+        "프라하",
+        "Praha"
+      ],
+      "latitude": 50.0755,
+      "longitude": 14.4378,
+      "legacyDemo": false
+    },
+    {
+      "id": "at-vienna",
+      "countryCode": "AT",
+      "country": "Austria",
+      "countryKo": "오스트리아",
+      "city": "Vienna",
+      "cityKo": "빈",
+      "nativeName": "Wien",
+      "countryAliases": [
+        "AT",
+        "AUT",
+        "Österreich",
+        "Osterreich",
+        "Austria",
+        "오스트리아"
+      ],
+      "aliases": [
+        "Vienna",
+        "빈",
+        "Wien",
+        "비엔나"
+      ],
+      "latitude": 48.2082,
+      "longitude": 16.3738,
+      "legacyDemo": false
+    },
+    {
+      "id": "ch-zurich",
+      "countryCode": "CH",
+      "country": "Switzerland",
+      "countryKo": "스위스",
+      "city": "Zurich",
+      "cityKo": "취리히",
+      "nativeName": "Zürich",
+      "countryAliases": [
+        "CH",
+        "CHE",
+        "Schweiz",
+        "Suisse",
+        "Svizzera",
+        "Switzerland",
+        "스위스"
+      ],
+      "aliases": [
+        "Zurich",
+        "취리히",
+        "Zürich",
+        "Zuerich"
+      ],
+      "latitude": 47.3769,
+      "longitude": 8.5417,
+      "legacyDemo": false
+    },
+    {
+      "id": "es-malaga",
+      "countryCode": "ES",
+      "country": "Spain",
+      "countryKo": "스페인",
+      "city": "Málaga",
+      "cityKo": "말라가",
+      "nativeName": "Málaga",
+      "countryAliases": [
+        "ES",
+        "ESP",
+        "España",
+        "Espana",
+        "Spain",
+        "스페인"
+      ],
+      "aliases": [
+        "Málaga",
+        "말라가",
+        "Malaga"
+      ],
+      "latitude": 36.7213,
+      "longitude": -4.4214,
+      "legacyDemo": true
+    },
+    {
+      "id": "us-new-york",
+      "countryCode": "US",
+      "country": "United States",
+      "countryKo": "미국",
+      "city": "New York",
+      "cityKo": "뉴욕",
+      "nativeName": "New York",
+      "countryAliases": [
+        "US",
+        "USA",
+        "U.S.",
+        "U.S.A.",
+        "United States of America",
+        "United States",
+        "미국"
+      ],
+      "aliases": [
+        "New York",
+        "뉴욕",
+        "New York City",
+        "NYC",
+        "뉴욕시"
+      ],
+      "latitude": 40.7128,
+      "longitude": -74.006,
+      "legacyDemo": false
+    },
+    {
+      "id": "us-los-angeles",
+      "countryCode": "US",
+      "country": "United States",
+      "countryKo": "미국",
+      "city": "Los Angeles",
+      "cityKo": "로스앤젤레스",
+      "nativeName": "Los Angeles",
+      "countryAliases": [
+        "US",
+        "USA",
+        "U.S.",
+        "U.S.A.",
+        "United States of America",
+        "United States",
+        "미국"
+      ],
+      "aliases": [
+        "Los Angeles",
+        "로스앤젤레스",
+        "LA",
+        "L.A.",
+        "로스엔젤레스",
+        "엘에이"
+      ],
+      "latitude": 34.0522,
+      "longitude": -118.2437,
+      "legacyDemo": false
+    },
+    {
+      "id": "us-san-francisco",
+      "countryCode": "US",
+      "country": "United States",
+      "countryKo": "미국",
+      "city": "San Francisco",
+      "cityKo": "샌프란시스코",
+      "nativeName": "San Francisco",
+      "countryAliases": [
+        "US",
+        "USA",
+        "U.S.",
+        "U.S.A.",
+        "United States of America",
+        "United States",
+        "미국"
+      ],
+      "aliases": [
+        "San Francisco",
+        "샌프란시스코",
+        "SF",
+        "S.F."
+      ],
+      "latitude": 37.7749,
+      "longitude": -122.4194,
+      "legacyDemo": false
+    },
+    {
+      "id": "us-chicago",
+      "countryCode": "US",
+      "country": "United States",
+      "countryKo": "미국",
+      "city": "Chicago",
+      "cityKo": "시카고",
+      "nativeName": "Chicago",
+      "countryAliases": [
+        "US",
+        "USA",
+        "U.S.",
+        "U.S.A.",
+        "United States of America",
+        "United States",
+        "미국"
+      ],
+      "aliases": [
+        "Chicago",
+        "시카고"
+      ],
+      "latitude": 41.8781,
+      "longitude": -87.6298,
+      "legacyDemo": false
+    },
+    {
+      "id": "us-boston",
+      "countryCode": "US",
+      "country": "United States",
+      "countryKo": "미국",
+      "city": "Boston",
+      "cityKo": "보스턴",
+      "nativeName": "Boston",
+      "countryAliases": [
+        "US",
+        "USA",
+        "U.S.",
+        "U.S.A.",
+        "United States of America",
+        "United States",
+        "미국"
+      ],
+      "aliases": [
+        "Boston",
+        "보스턴"
+      ],
+      "latitude": 42.3601,
+      "longitude": -71.0589,
+      "legacyDemo": false
+    },
+    {
+      "id": "us-washington-dc",
+      "countryCode": "US",
+      "country": "United States",
+      "countryKo": "미국",
+      "city": "Washington DC",
+      "cityKo": "워싱턴 DC",
+      "nativeName": "Washington, D.C.",
+      "countryAliases": [
+        "US",
+        "USA",
+        "U.S.",
+        "U.S.A.",
+        "United States of America",
+        "United States",
+        "미국"
+      ],
+      "aliases": [
+        "Washington DC",
+        "워싱턴 DC",
+        "Washington, D.C.",
+        "Washington D.C.",
+        "DC",
+        "D.C.",
+        "워싱턴디씨",
+        "워싱턴디시",
+        "워싱턴"
+      ],
+      "latitude": 38.9072,
+      "longitude": -77.0369,
+      "legacyDemo": false
+    },
+    {
+      "id": "us-seattle",
+      "countryCode": "US",
+      "country": "United States",
+      "countryKo": "미국",
+      "city": "Seattle",
+      "cityKo": "시애틀",
+      "nativeName": "Seattle",
+      "countryAliases": [
+        "US",
+        "USA",
+        "U.S.",
+        "U.S.A.",
+        "United States of America",
+        "United States",
+        "미국"
+      ],
+      "aliases": [
+        "Seattle",
+        "시애틀"
+      ],
+      "latitude": 47.6062,
+      "longitude": -122.3321,
+      "legacyDemo": false
+    },
+    {
+      "id": "us-las-vegas",
+      "countryCode": "US",
+      "country": "United States",
+      "countryKo": "미국",
+      "city": "Las Vegas",
+      "cityKo": "라스베이거스",
+      "nativeName": "Las Vegas",
+      "countryAliases": [
+        "US",
+        "USA",
+        "U.S.",
+        "U.S.A.",
+        "United States of America",
+        "United States",
+        "미국"
+      ],
+      "aliases": [
+        "Las Vegas",
+        "라스베이거스",
+        "라스베가스"
+      ],
+      "latitude": 36.1699,
+      "longitude": -115.1398,
+      "legacyDemo": false
+    }
+  ]
+}

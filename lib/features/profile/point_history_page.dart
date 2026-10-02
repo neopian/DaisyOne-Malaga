@@ -14,7 +14,7 @@ class PointHistoryPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final transactions = ref.watch(pointTransactionsProvider);
     return AppPage(
-      title: '포인트 내역',
+      title: '가상 포인트 내역',
       actions: [
         IconButton(
           tooltip: '새로고침',
@@ -68,10 +68,10 @@ class PointHistoryPage extends ConsumerWidget {
 
   String _label(String type) {
     return switch (type) {
-      'charge_mock' => 'Mock 충전',
+      'charge_mock' => '가상 포인트 지급',
       'hold' => '질문 보상 보류',
       'reward' => '답변 보상',
-      'refund' => '환불',
+      'refund' => '가상 포인트 반환',
       'penalty' => '패널티',
       'admin_adjustment' => '관리자 조정',
       _ => type,

@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/services/mvp_rules.dart';
 import '../../core/utils/formatters.dart';
 import '../../shared/models/answer.dart';
 import '../../shared/models/evidence_link.dart';
@@ -11,9 +14,11 @@ import '../../shared/models/question_comment.dart';
 import '../../shared/widgets/app_page.dart';
 import '../../shared/widgets/async_value_view.dart';
 import '../../shared/widgets/status_chip.dart';
+import '../../shared/widgets/guide_activity_card.dart';
 import '../answers/answer_repository.dart';
 import '../helper_application/helper_repository.dart';
 import '../profile/profile_repository.dart';
+import '../safety/safety_menu.dart';
 import 'question_realtime.dart';
 import 'question_repository.dart';
 
@@ -27,6 +32,7 @@ class QuestionDetailPage extends ConsumerWidget {
     ref.watch(questionRealtimeProvider);
     final question = ref.watch(questionProvider(questionId));
     return AppPage(
+      maxWidth: 760,
       title: '질문 상세',
       actions: [
         IconButton(
@@ -34,12 +40,14 @@ class QuestionDetailPage extends ConsumerWidget {
           onPressed: () {
             ref.invalidate(questionProvider(questionId));
             ref.invalidate(helperApplicationProvider);
+            ref.invalidate(guideSummaryProvider);
           },
           icon: const Icon(Icons.refresh),
         ),
       ],
       body: AsyncValueView(
         value: question,
+        onRetry: () => ref.invalidate(questionProvider(questionId)),
         data: (data) => _QuestionDetail(question: data),
       ),
     );
@@ -60,8 +68,12 @@ class _QuestionDetail extends ConsumerWidget {
         ?.value;
     final isOwner = profile?.id == question.userId;
     final isAssignedHelper = profile?.id == question.assignedHelperUserId;
-    final canAcceptQuestion =
-        question.isOpen && !isOwner && (helperApplication?.isApproved ?? false);
+    final canAcceptQuestion = MvpRules.canAcceptQuestion(
+      questionStatus: question.status,
+      helperApproved: helperApplication?.isApproved ?? false,
+      questionOwnerId: question.userId,
+      currentUserId: profile?.id,
+    );
     final answer = question.submittedAnswer;
 
     return ListView(
@@ -73,21 +85,27 @@ class _QuestionDetail extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     StatusChip(
                       label: question.status,
                       emphasis: question.isOpen,
                     ),
-                    const SizedBox(width: 8),
                     StatusChip(label: question.urgency),
-                    const Spacer(),
                     Text(
                       formatPoints(question.rewardPoints),
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         color: Theme.of(context).colorScheme.primary,
                         fontWeight: FontWeight.w800,
                       ),
+                    ),
+                    SafetyMenu(
+                      targetType: 'question',
+                      targetId: question.id,
+                      authorId: question.userId,
                     ),
                   ],
                 ),
@@ -112,6 +130,20 @@ class _QuestionDetail extends ConsumerWidget {
             ),
           ),
         ),
+        if ((isOwner || isAssignedHelper) &&
+            question.assignedHelper != null) ...[
+          const SizedBox(height: 12),
+          AssignedGuideCard(guide: question.assignedHelper!),
+          Align(
+            alignment: Alignment.centerRight,
+            child: SafetyMenu(
+              targetType: 'user',
+              targetId: question.assignedHelper!.id,
+              authorId: question.assignedHelper!.id,
+              authorName: question.assignedHelper!.name,
+            ),
+          ),
+        ],
         if (question.images.isNotEmpty) ...[
           const SizedBox(height: 12),
           SizedBox(
@@ -127,6 +159,10 @@ class _QuestionDetail extends ConsumerWidget {
                   width: 160,
                   height: 132,
                   fit: BoxFit.cover,
+                  errorBuilder: (_, _, _) => const SizedBox(
+                    width: 160,
+                    child: Center(child: Icon(Icons.broken_image_outlined)),
+                  ),
                 ),
               ),
             ),
@@ -138,18 +174,27 @@ class _QuestionDetail extends ConsumerWidget {
           currentUserId: profile?.id,
         ),
         const SizedBox(height: 12),
-        if (canAcceptQuestion)
+        if (canAcceptQuestion) ...[
+          const _InfoCard(
+            icon: Icons.place_outlined,
+            title: '등록한 활동 지역의 질문만 수락할 수 있어요. 수락 시 참여 상태와 지역을 다시 확인합니다.',
+          ),
+          const SizedBox(height: 12),
           _ActionCard(
             icon: Icons.handshake_outlined,
             title: '질문 수락',
             buttonLabel: '1:1로 수락',
             onPressed: () => _acceptQuestion(context, ref, question.id),
           ),
-        if (question.isOpen && isOwner)
+        ],
+        if (question.isOpen && isOwner) ...[
           const _InfoCard(
             icon: Icons.info_outline,
             title: '내가 작성한 질문은 답변자로 수락할 수 없습니다',
           ),
+          const SizedBox(height: 12),
+          _CancelQuestionCard(question: question),
+        ],
         if (isAssignedHelper && question.isAssigned)
           _ActionCard(
             icon: Icons.edit_note_outlined,
@@ -177,11 +222,13 @@ class _QuestionDetail extends ConsumerWidget {
     String questionId,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
+    final container = ProviderScope.containerOf(context, listen: false);
     try {
       await ref.read(questionRepositoryProvider).acceptQuestion(questionId);
-      ref.invalidate(questionProvider(questionId));
-      ref.invalidate(questionsProvider);
-      ref.invalidate(helperOpenQuestionsProvider);
+      container.invalidate(questionProvider(questionId));
+      container.invalidate(questionsProvider);
+      container.invalidate(helperOpenQuestionsProvider);
+      container.invalidate(guideSummaryProvider);
       messenger.showSnackBar(const SnackBar(content: Text('질문을 수락했습니다.')));
     } catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.toString())));
@@ -195,17 +242,116 @@ class _QuestionDetail extends ConsumerWidget {
     Answer answer,
   ) async {
     final messenger = ScaffoldMessenger.of(context);
+    final container = ProviderScope.containerOf(context, listen: false);
     try {
       await ref
           .read(answerRepositoryProvider)
           .acceptAnswer(questionId: question.id, answerId: answer.id);
-      ref.invalidate(questionProvider(question.id));
-      ref.invalidate(questionsProvider);
-      ref.invalidate(currentProfileProvider);
+      container.invalidate(questionProvider(question.id));
+      container.invalidate(questionsProvider);
+      container.invalidate(currentProfileProvider);
+      container.invalidate(pointTransactionsProvider);
+      container.invalidate(guideSummaryProvider);
       messenger.showSnackBar(const SnackBar(content: Text('답변을 채택했습니다.')));
     } catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.toString())));
     }
+  }
+}
+
+class _CancelQuestionCard extends ConsumerStatefulWidget {
+  const _CancelQuestionCard({required this.question});
+
+  final Question question;
+
+  @override
+  ConsumerState<_CancelQuestionCard> createState() =>
+      _CancelQuestionCardState();
+}
+
+class _CancelQuestionCardState extends ConsumerState<_CancelQuestionCard> {
+  bool _isCancelling = false;
+
+  Future<void> _cancel() async {
+    if (_isCancelling) return;
+    setState(() => _isCancelling = true);
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('질문을 취소할까요?'),
+          content: Text(
+            '아직 답변자가 수락하지 않은 질문만 취소할 수 있습니다. '
+            '취소하면 보류 중인 ${formatPoints(widget.question.rewardPoints)}가 '
+            'mock 포인트 잔액으로 환급됩니다.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('돌아가기'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('취소하고 환급받기'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+
+      final container = ProviderScope.containerOf(context, listen: false);
+      final repository = ref.read(questionRepositoryProvider);
+      final questionId = widget.question.id;
+      await repository.cancelQuestion(questionId);
+      // Keep shared balances and feeds fresh even if this page was dismissed.
+      container.invalidate(questionProvider(questionId));
+      container.invalidate(questionsProvider);
+      container.invalidate(helperOpenQuestionsProvider);
+      container.invalidate(currentProfileProvider);
+      container.invalidate(pointTransactionsProvider);
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('질문을 취소하고 보류 포인트를 환급했습니다.')));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.toString())));
+    } finally {
+      if (mounted) setState(() => _isCancelling = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('질문 취소', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 8),
+            const Text('답변자가 수락하기 전에는 질문을 취소하고 보류된 mock 포인트를 돌려받을 수 있습니다.'),
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton.icon(
+                onPressed: _isCancelling ? null : _cancel,
+                icon: _isCancelling
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.cancel_outlined),
+                label: const Text('질문 취소 및 환급'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -334,6 +480,7 @@ class _CommentComposerState extends ConsumerState<_CommentComposer> {
   Future<void> _submit() async {
     final body = _controller.text.trim();
     final messenger = ScaffoldMessenger.of(context);
+    final container = ProviderScope.containerOf(context, listen: false);
 
     if (body.isEmpty) {
       messenger.showSnackBar(const SnackBar(content: Text('코멘트를 입력해 주세요.')));
@@ -345,8 +492,10 @@ class _CommentComposerState extends ConsumerState<_CommentComposer> {
       await ref
           .read(questionRepositoryProvider)
           .addComment(questionId: widget.questionId, body: body);
-      _controller.clear();
-      ref.invalidate(questionProvider(widget.questionId));
+      if (mounted) _controller.clear();
+      container.invalidate(questionProvider(widget.questionId));
+      container.invalidate(questionsProvider);
+      container.invalidate(helperOpenQuestionsProvider);
       messenger.showSnackBar(const SnackBar(content: Text('코멘트를 남겼습니다.')));
     } catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.toString())));
@@ -413,6 +562,13 @@ class _QuestionCommentTile extends StatelessWidget {
             ],
           ),
         ),
+        if (!isMine)
+          SafetyMenu(
+            targetType: 'comment',
+            targetId: comment.id,
+            authorId: comment.userId,
+            authorName: authorName,
+          ),
       ],
     );
   }
@@ -427,7 +583,7 @@ class _AnswerCard extends StatelessWidget {
 
   final Answer answer;
   final bool canAccept;
-  final VoidCallback onAccept;
+  final Future<void> Function() onAccept;
 
   @override
   Widget build(BuildContext context) {
@@ -439,7 +595,7 @@ class _AnswerCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                const Icon(Icons.verified_outlined),
+                const Icon(Icons.forum_outlined),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -450,6 +606,12 @@ class _AnswerCard extends StatelessWidget {
                 StatusChip(
                   label: answer.status,
                   emphasis: answer.status == 'accepted',
+                ),
+                SafetyMenu(
+                  targetType: 'answer',
+                  targetId: answer.id,
+                  authorId: answer.helperUserId,
+                  authorName: '답변자',
                 ),
               ],
             ),
@@ -467,10 +629,10 @@ class _AnswerCard extends StatelessWidget {
             for (final link in answer.evidenceLinks) _EvidenceTile(link: link),
             if (canAccept) ...[
               const SizedBox(height: 16),
-              FilledButton.icon(
+              _BusyFilledButton(
                 onPressed: onAccept,
-                icon: const Icon(Icons.check_circle_outline),
-                label: const Text('답변 채택'),
+                icon: Icons.check_circle_outline,
+                label: '답변 채택',
               ),
             ],
           ],
@@ -494,9 +656,30 @@ class _EvidenceTile extends StatelessWidget {
       subtitle: Text(link.description ?? link.sourceType),
       trailing: const Icon(Icons.open_in_new),
       onTap: () async {
-        final uri = Uri.tryParse(link.url);
-        if (uri != null) {
-          await launchUrl(uri, mode: LaunchMode.externalApplication);
+        final messenger = ScaffoldMessenger.of(context);
+        if (!MvpRules.isValidEvidenceUrl(link.url)) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('안전한 http 또는 https 근거 URL만 열 수 있습니다.'),
+            ),
+          );
+          return;
+        }
+        try {
+          final opened = await launchUrl(
+            Uri.parse(link.url),
+            mode: LaunchMode.externalApplication,
+          );
+          if (!opened && context.mounted) {
+            messenger.showSnackBar(
+              const SnackBar(content: Text('근거 링크를 열 수 없습니다.')),
+            );
+          }
+        } catch (_) {
+          if (!context.mounted) return;
+          messenger.showSnackBar(
+            const SnackBar(content: Text('근거 링크를 열 수 없습니다.')),
+          );
         }
       },
     );
@@ -514,7 +697,7 @@ class _ActionCard extends StatelessWidget {
   final IconData icon;
   final String title;
   final String buttonLabel;
-  final VoidCallback onPressed;
+  final FutureOr<void> Function() onPressed;
 
   @override
   Widget build(BuildContext context) {
@@ -539,9 +722,9 @@ class _ActionCard extends StatelessWidget {
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerRight,
-              child: FilledButton(
+              child: _BusyFilledButton(
                 onPressed: onPressed,
-                child: Text(buttonLabel),
+                label: buttonLabel,
               ),
             ),
           ],
@@ -572,4 +755,44 @@ class _InfoCard extends StatelessWidget {
       ),
     );
   }
+}
+
+class _BusyFilledButton extends StatefulWidget {
+  const _BusyFilledButton({
+    required this.onPressed,
+    required this.label,
+    this.icon,
+  });
+  final FutureOr<void> Function() onPressed;
+  final String label;
+  final IconData? icon;
+  @override
+  State<_BusyFilledButton> createState() => _BusyFilledButtonState();
+}
+
+class _BusyFilledButtonState extends State<_BusyFilledButton> {
+  bool _busy = false;
+  Future<void> _run() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await widget.onPressed();
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => FilledButton.icon(
+    onPressed: _busy ? null : _run,
+    icon: _busy
+        ? const SizedBox.square(
+            dimension: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          )
+        : widget.icon == null
+        ? const SizedBox.shrink()
+        : Icon(widget.icon),
+    label: Text(widget.label),
+  );
 }

@@ -1,0 +1,260 @@
+# Manual-only unsigned review measurement; no push or scheduled trigger.
+# Owner approved this public review branch, a workflow-only main change, and ONE
+# free standard-macOS unsigned bootstrap run. GitHub connection and verified
+# zero-cost eligibility remain prerequisites. No automatic rerun or paid fallback.
+name: Measure unsigned iOS bootstrap
+
+'on':
+  workflow_dispatch:
+    inputs:
+      approved_source_sha:
+        description: Exact 40-character commit SHA approved for this run
+        required: true
+        type: string
+      zero_cost_verified:
+        description: Standard-runner eligibility and ordinary job logs verified to cost zero
+        required: true
+        default: false
+        type: boolean
+
+# Public source and ordinary job-log disclosure for this route are approved.
+# Activation remains blocked on GitHub connection and zero-cost verification.
+# No repository writes, OIDC, signing secrets or App Store credentials.
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-unsigned-review
+  cancel-in-progress: false
+
+jobs:
+  unsigned-ios:
+    if: >-
+      github.repository == 'neopian/DaisyOne-Malaga' &&
+      github.ref == 'refs/heads/review/ios-unsigned-validation' &&
+      github.run_attempt == '1' &&
+      inputs.zero_cost_verified
+    # Standard ephemeral arm64 VM; no larger/paid runner fallback is configured.
+    # This label is a rolling image, so record its actual version below.
+    runs-on: macos-26
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: bash
+    env:
+      CI: 'true'
+      BOT: 'true'
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      DASH__SUPPRESS_ANALYTICS: 'true'
+      COCOAPODS_DISABLE_STATS: 'true'
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      FLUTTER_VERSION: 3.47.5
+      # Verified in the existing SDK's bin/cache/flutter.version.json.
+      FLUTTER_COMMIT: 6a19cca56475dbfba1478ee68d7bd0c2ef891da1
+
+    steps:
+      - name: Check out the selected review-branch commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+          lfs: false
+
+      - name: Verify source identity and the preinstalled Apple toolchain
+        env:
+          APPROVED_SOURCE_SHA: ${{ inputs.approved_source_sha }}
+        run: |
+          [[ "$APPROVED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$(git rev-parse HEAD)" == "$APPROVED_SOURCE_SHA" ]]
+          [[ "$(uname -s)" == Darwin ]]
+          [[ -d "$DEVELOPER_DIR" ]]
+          command -v python3
+          command -v ruby
+          command -v gem
+          mkdir -p "$RUNNER_TEMP/ios-ci-evidence"
+          python3 - <<'PY'
+          import json, os, pathlib, subprocess
+          record = {
+              'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(),
+              'scope': 'unsigned bootstrap validation of proposed native state',
+              'runner_image': os.environ.get('ImageOS', 'not provided'),
+              'runner_image_version': os.environ.get('ImageVersion', 'not provided'),
+              'runner_arch': os.environ.get('RUNNER_ARCH', 'not provided'),
+              'developer_dir': os.environ['DEVELOPER_DIR'],
+              'run_id': os.environ['GITHUB_RUN_ID'],
+              'run_attempt': os.environ['GITHUB_RUN_ATTEMPT'],
+          }
+          (pathlib.Path(os.environ['RUNNER_TEMP']) / 'ios-ci-evidence/source-and-run.json').write_text(
+              json.dumps(record, indent=2) + '\n')
+          PY
+          xcodebuild -version | tee "$RUNNER_TEMP/ios-ci-evidence/xcode-version.txt"
+          xcrun --sdk iphoneos --show-sdk-version | tee "$RUNNER_TEMP/ios-ci-evidence/ios-sdk.txt"
+          python3 - <<'PY'
+          import os, pathlib, re
+          root = pathlib.Path(os.environ['RUNNER_TEMP']) / 'ios-ci-evidence'
+          version = re.search(r'^Xcode (\d+)', (root / 'xcode-version.txt').read_text(), re.M)
+          sdk = re.fullmatch(r'(\d+)(?:\.\d+)*\s*', (root / 'ios-sdk.txt').read_text())
+          assert version and int(version[1]) >= 26, 'Xcode 26+ is required'
+          assert sdk and int(sdk[1]) >= 26, 'iOS 26+ SDK is required'
+          PY
+          # Check only. Do not accept licenses, install Xcode, or alter its selection.
+          xcodebuild -checkFirstLaunchStatus
+
+      - name: Prepare pinned Flutter from its official repository
+        timeout-minutes: 12
+        run: |
+          sdk_dir="$RUNNER_TEMP/flutter-ios-sdk"
+          git init "$sdk_dir"
+          git -C "$sdk_dir" remote add origin https://github.com/flutter/flutter.git
+          git -C "$sdk_dir" fetch --depth=1 origin \
+            "refs/tags/$FLUTTER_VERSION:refs/tags/$FLUTTER_VERSION"
+          [[ "$(git -C "$sdk_dir" rev-parse "refs/tags/$FLUTTER_VERSION^{commit}")" == "$FLUTTER_COMMIT" ]]
+          git -C "$sdk_dir" checkout --detach "$FLUTTER_COMMIT"
+          "$sdk_dir/bin/flutter" --version --machine > "$RUNNER_TEMP/ios-ci-evidence/flutter-version.json"
+          python3 - <<'PY'
+          import json, os, pathlib
+          info = json.loads((pathlib.Path(os.environ['RUNNER_TEMP']) /
+                             'ios-ci-evidence/flutter-version.json').read_text())
+          assert info['frameworkRevision'] == os.environ['FLUTTER_COMMIT']
+          assert info['frameworkVersion'] == os.environ['FLUTTER_VERSION']
+          PY
+          # This setting is scoped to the disposable hosted runner, not an owner's Mac.
+          "$sdk_dir/bin/flutter" config --no-enable-swift-package-manager
+          "$sdk_dir/bin/flutter" precache --ios
+          printf 'FLUTTER_BIN=%s/bin/flutter\n' "$sdk_dir" >> "$GITHUB_ENV"
+          printf '%s/bin\n' "$sdk_dir" >> "$GITHUB_PATH"
+
+      - name: Prepare CocoaPods 1.16.2 in a disposable gem directory
+        timeout-minutes: 8
+        run: |
+          ios_gem_dir="$RUNNER_TEMP/ios-cocoapods-gems"
+          export GEM_HOME="$ios_gem_dir"
+          export GEM_PATH="$ios_gem_dir"
+          gem install cocoapods --version 1.16.2 --no-document \
+            --clear-sources --source https://rubygems.org
+          [[ "$("$ios_gem_dir/bin/pod" --version)" == 1.16.2 ]]
+          ruby --version > "$RUNNER_TEMP/ios-ci-evidence/ruby-version.txt"
+          gem list --local > "$RUNNER_TEMP/ios-ci-evidence/installed-gems.txt"
+          printf 'GEM_HOME=%s\nGEM_PATH=%s\n' "$ios_gem_dir" "$ios_gem_dir" >> "$GITHUB_ENV"
+          printf '%s/bin\n' "$ios_gem_dir" >> "$GITHUB_PATH"
+
+      - name: Bootstrap native dependencies and configuration in the disposable workspace
+        timeout-minutes: 15
+        run: |
+          "$FLUTTER_BIN" pub get --enforce-lockfile
+          # This one-run bootstrap proposes native state; it does not approve or commit it.
+          # No pod update, repository push, signed build or distribution command.
+          pod install --project-directory=ios 2>&1 | tee "$RUNNER_TEMP/ios-ci-evidence/pods-refresh.log"
+          "$FLUTTER_BIN" build ios --release --no-codesign --config-only --no-pub \
+            --dart-define=API_BASE_URL=https://native-build.invalid/api \
+            --dart-define=DEMO_MODE=false --dart-define=ENABLE_DEV_LOGIN=false \
+            --dart-define=QA_AUTO_LOGIN=false \
+            2>&1 | tee "$RUNNER_TEMP/ios-ci-evidence/native-configuration.log"
+          # Any changed native lock/project remains an uncommitted proposal.
+          git diff --exit-code -- pubspec.yaml pubspec.lock
+          git diff --binary -- pubspec.yaml pubspec.lock ios > "$RUNNER_TEMP/ios-ci-evidence/bootstrap-native-source.patch"
+          cp ios/Podfile.lock "$RUNNER_TEMP/ios-ci-evidence/bootstrap-Podfile.lock"
+          shasum -a 256 "$RUNNER_TEMP/ios-ci-evidence/bootstrap-Podfile.lock" \
+            "$RUNNER_TEMP/ios-ci-evidence/bootstrap-native-source.patch" \
+            > "$RUNNER_TEMP/ios-ci-evidence/bootstrap-hashes.txt"
+          printf '%s\n' 'Runner-generated native proposal. Later strict-script snapshots start from this unreviewed state.' \
+            > "$RUNNER_TEMP/ios-ci-evidence/bootstrap-scope.txt"
+
+      - name: Measure unsigned build and analysis against the proposed native state
+        timeout-minutes: 25
+        run: |
+          # Strict validation now sees the runner-generated lock/project as its
+          # initial snapshot. A pass is bootstrap evidence, not locked-release approval.
+          export VERIFY_IOS_REPORT_DIR="$RUNNER_TEMP/ios-native-reports"
+          export IOS_REAL_XCODEBUILD="$(command -v xcodebuild)"
+          mkdir "$RUNNER_TEMP/ios-timing-bin"
+          cat > "$RUNNER_TEMP/ios-timing-bin/xcodebuild" <<'XCODEWRAPPER'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          has_build=false
+          has_analyze=false
+          for argument in "$@"; do
+            [[ "$argument" != build ]] || has_build=true
+            [[ "$argument" != analyze ]] || has_analyze=true
+          done
+          if "$has_build" && "$has_analyze"; then
+            started=$(date +%s)
+            if "$IOS_REAL_XCODEBUILD" "$@"; then result=0; else result=$?; fi
+            finished=$(date +%s)
+            python3 - "$started" "$finished" "$result" <<'PYTIME'
+          import json, os, pathlib, sys
+          record = {'phase': 'unsigned Xcode build and analyze invocation',
+                    'started_epoch_seconds': int(sys.argv[1]),
+                    'finished_epoch_seconds': int(sys.argv[2]),
+                    'wall_seconds': int(sys.argv[2]) - int(sys.argv[1]),
+                    'exit_code': int(sys.argv[3]),
+                    'scope': 'proposed runner-generated native state; not final release'}
+          (pathlib.Path(os.environ['RUNNER_TEMP']) /
+           'ios-ci-evidence/xcode-build-analyze-timing.json').write_text(json.dumps(record, indent=2) + '\n')
+          PYTIME
+            exit "$result"
+          fi
+          exec "$IOS_REAL_XCODEBUILD" "$@"
+          XCODEWRAPPER
+          chmod +x "$RUNNER_TEMP/ios-timing-bin/xcodebuild"
+          export PATH="$RUNNER_TEMP/ios-timing-bin:$PATH"
+          bash scripts/verify-ios-macos.sh \
+            2>&1 | tee "$RUNNER_TEMP/ios-ci-evidence/validation-console.log"
+          printf '%s\n' 'Unsigned bootstrap validation passed for proposed native state only. Review the generated lock/project patch before treating it as an accepted baseline.' \
+            > "$RUNNER_TEMP/ios-ci-evidence/bootstrap-result.txt"
+
+      - name: Print bounded reproducible evidence to ordinary job logs
+        if: always()
+        timeout-minutes: 3
+        run: |
+          evidence="$RUNNER_TEMP/ios-ci-evidence"
+          mkdir -p "$evidence"
+          if [[ -d .git ]]; then
+            git status --short > "$evidence/source-status.txt"
+            git diff --binary -- pubspec.yaml pubspec.lock ios > "$evidence/native-source-proposal.patch"
+            if [[ -f ios/Podfile.lock ]]; then
+              cp ios/Podfile.lock "$evidence/Podfile.lock"
+            fi
+          fi
+          python3 - <<'PYLOG'
+          import base64, hashlib, os, pathlib
+          temp = pathlib.Path(os.environ['RUNNER_TEMP'])
+          evidence = temp / 'ios-ci-evidence'
+          # Exact lock and patch bytes can be reconstructed from these bounded
+          # base64 blocks; neither an artifact nor a persistent cache is uploaded.
+          for name in ('bootstrap-Podfile.lock', 'bootstrap-native-source.patch',
+                       'Podfile.lock', 'native-source-proposal.patch'):
+              path = evidence / name
+              if not path.is_file():
+                  print(f'Unavailable: {name}')
+                  continue
+              raw = path.read_bytes()
+              if len(raw) > 256 * 1024:
+                  raise SystemExit(f'{name} exceeds log-transfer cap; stop for a reviewed free transfer method.')
+              print(f'BEGIN EXACT FILE: {name}; bytes={len(raw)}; sha256={hashlib.sha256(raw).hexdigest()}')
+              encoded = base64.b64encode(raw).decode('ascii')
+              for offset in range(0, len(encoded), 76):
+                  print(encoded[offset:offset + 76])
+              print(f'END EXACT FILE: {name}')
+          names = ('source-and-run.json', 'source-status.txt', 'xcode-version.txt',
+                   'ios-sdk.txt', 'flutter-version.json', 'ruby-version.txt',
+                   'installed-gems.txt', 'bootstrap-hashes.txt', 'bootstrap-scope.txt',
+                   'bootstrap-result.txt', 'xcode-build-analyze-timing.json')
+          for name in names:
+              path = evidence / name
+              if path.is_file():
+                  raw = path.read_text(errors='replace')
+                  if len(raw) > 65536:
+                      raise SystemExit(f'Metadata unexpectedly large: {name}')
+                  print(f'BEGIN METADATA: {name}\n{raw}\nEND METADATA: {name}')
+          for run in sorted((temp / 'ios-native-reports').glob('run.*')):
+              for path in sorted(run.iterdir()):
+                  if path.is_file() and path.suffix in ('.log', '.json', '.txt'):
+                      raw = path.read_text(errors='replace')
+                      excerpt = raw[-65536:]
+                      label = 'FULL' if len(raw) == len(excerpt) else 'LAST 65536 CHARACTERS ONLY'
+                      print(f'BEGIN {label}: {path.name}\n{excerpt}\nEND: {path.name}')
+          print('Evidence is in ordinary job logs only. No artifacts, SDK caches, app bundles or xcresult archives uploaded.')
+          PYLOG

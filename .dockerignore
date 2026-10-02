@@ -1,0 +1,13 @@
+# The API build context needs only these server sources and the shared catalog.
+*
+!backend/
+backend/*
+!backend/package.json
+!backend/package-lock.json
+!backend/src/
+!backend/src/**
+!backend/migrations/
+!backend/migrations/**
+!backend/Dockerfile
+!config/
+!config/cities.json

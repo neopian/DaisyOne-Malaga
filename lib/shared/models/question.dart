@@ -1,4 +1,5 @@
 import 'answer.dart';
+import 'guide_summary.dart';
 import 'question_comment.dart';
 
 class Question {
@@ -19,6 +20,7 @@ class Question {
     this.latitude,
     this.longitude,
     this.assignedHelperUserId,
+    this.assignedHelper,
     this.regionName,
     this.acceptedAnswerId,
     this.createdAt,
@@ -29,6 +31,7 @@ class Question {
   final String id;
   final String userId;
   final String? assignedHelperUserId;
+  final AssignedGuideSummary? assignedHelper;
   final String country;
   final String city;
   final String? regionName;
@@ -87,6 +90,11 @@ class Question {
       id: map['id'] as String? ?? '',
       userId: map['user_id'] as String? ?? '',
       assignedHelperUserId: map['assigned_helper_user_id'] as String?,
+      assignedHelper: map['assigned_helper'] is Map
+          ? AssignedGuideSummary.fromMap(
+              Map<String, dynamic>.from(map['assigned_helper'] as Map),
+            )
+          : null,
       country: map['country'] as String? ?? '',
       city: map['city'] as String? ?? '',
       regionName: map['region_name'] as String?,

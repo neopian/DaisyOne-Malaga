@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../shared/widgets/app_page.dart';
+import '../../core/geo/city_catalog.g.dart';
+import '../../shared/widgets/travel_city_picker.dart';
 import 'helper_repository.dart';
 
 class HelperApplicationPage extends ConsumerStatefulWidget {
@@ -23,6 +25,7 @@ class _HelperApplicationPageState extends ConsumerState<HelperApplicationPage> {
   final _experience = TextEditingController();
   final _regions = <RegionInput>[];
   bool _isSaving = false;
+  String? _selectedCityId;
 
   @override
   void dispose() {
@@ -36,7 +39,20 @@ class _HelperApplicationPageState extends ConsumerState<HelperApplicationPage> {
   }
 
   void _addRegion() {
-    if (_country.text.trim().isEmpty || _city.text.trim().isEmpty) return;
+    if (_isSaving ||
+        !CityCatalog.isSupportedLocation(_country.text, _city.text)) {
+      return;
+    }
+    final regionName = _region.text.trim();
+    if (_regions.any(
+      (r) =>
+          r.country == _country.text &&
+          r.city == _city.text &&
+          (r.regionName ?? '') == regionName,
+    )) {
+      return;
+    }
+    if (_regions.length >= 20) return;
     setState(() {
       _regions.add(
         RegionInput(
@@ -45,6 +61,7 @@ class _HelperApplicationPageState extends ConsumerState<HelperApplicationPage> {
           regionName: _region.text.trim().isEmpty ? null : _region.text.trim(),
         ),
       );
+      _selectedCityId = null;
       _country.clear();
       _city.clear();
       _region.clear();
@@ -52,10 +69,8 @@ class _HelperApplicationPageState extends ConsumerState<HelperApplicationPage> {
   }
 
   Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
-    if (_regions.isEmpty &&
-        _country.text.trim().isNotEmpty &&
-        _city.text.trim().isNotEmpty) {
+    if (_isSaving || !_formKey.currentState!.validate()) return;
+    if (_country.text.trim().isNotEmpty && _city.text.trim().isNotEmpty) {
       _addRegion();
     }
     if (_regions.isEmpty) {
@@ -68,6 +83,7 @@ class _HelperApplicationPageState extends ConsumerState<HelperApplicationPage> {
     setState(() => _isSaving = true);
     final messenger = ScaffoldMessenger.of(context);
     final router = GoRouter.of(context);
+    final container = ProviderScope.containerOf(context, listen: false);
     try {
       await ref
           .read(helperRepositoryProvider)
@@ -81,8 +97,9 @@ class _HelperApplicationPageState extends ConsumerState<HelperApplicationPage> {
             introduction: _introduction.text,
             experienceDescription: _experience.text,
           );
-      ref.invalidate(helperApplicationProvider);
-      ref.invalidate(helperRegionsProvider);
+      container.invalidate(helperApplicationProvider);
+      container.invalidate(helperRegionsProvider);
+      container.invalidate(guideSummaryProvider);
       if (mounted) router.go('/helper/waiting');
     } catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.toString())));
@@ -113,22 +130,29 @@ class _HelperApplicationPageState extends ConsumerState<HelperApplicationPage> {
                     : null,
               ),
               const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _country,
-                      decoration: const InputDecoration(labelText: '국가'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _city,
-                      decoration: const InputDecoration(labelText: '도시'),
-                    ),
-                  ),
-                ],
+              OutlinedButton.icon(
+                key: const ValueKey('guide-city-select'),
+                onPressed: _isSaving
+                    ? null
+                    : () async {
+                        final city = await showTravelCityPicker(context);
+                        if (!mounted || _isSaving || city == null) return;
+                        setState(() {
+                          _selectedCityId = city.id;
+                          _country.text = city.country;
+                          _city.text = city.city;
+                        });
+                      },
+                icon: const Icon(Icons.location_city_outlined),
+                label: Text(
+                  _selectedCityId == null
+                      ? '활동할 도시 선택'
+                      : '${CityCatalog.findCity(_country.text, _city.text)?.cityKo ?? _city.text} · ${CityCatalog.countryLabel(_country.text)}',
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                '잘 아는 도시를 선택해주세요. 신청은 운영자 검토 후 반영되며 답변 가능 인원을 보장하지 않습니다.',
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -140,7 +164,7 @@ class _HelperApplicationPageState extends ConsumerState<HelperApplicationPage> {
               ),
               const SizedBox(height: 8),
               OutlinedButton.icon(
-                onPressed: _addRegion,
+                onPressed: _isSaving ? null : _addRegion,
                 icon: const Icon(Icons.add_location_alt_outlined),
                 label: const Text('지역 추가'),
               ),
@@ -153,11 +177,12 @@ class _HelperApplicationPageState extends ConsumerState<HelperApplicationPage> {
                     for (final region in _regions)
                       InputChip(
                         label: Text(
-                          '${region.country} ${region.city}'
+                          '${CityCatalog.countryLabel(region.country)} · ${CityCatalog.findCity(region.country, region.city)?.cityKo ?? region.city}'
                           '${region.regionName == null ? '' : ' · ${region.regionName}'}',
                         ),
-                        onDeleted: () =>
-                            setState(() => _regions.remove(region)),
+                        onDeleted: _isSaving
+                            ? null
+                            : () => setState(() => _regions.remove(region)),
                       ),
                   ],
                 ),

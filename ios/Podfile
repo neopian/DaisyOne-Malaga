@@ -1,5 +1,6 @@
-# Uncomment this line to define a global platform for your project
-# platform :ios, '12.0'
+# Current Flutter and native plugins require iOS 13 or later. This minimum
+# device OS is independent of Apple's current submission SDK requirement.
+platform :ios, '13.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'
@@ -36,8 +37,37 @@ target 'Runner' do
   end
 end
 
+# geocoding_ios 3.1.0 moved its manifest one directory deeper but its CocoaPods
+# resource path still names the old location. Repair only that exact known
+# mapping in the resolved spec, without changing the package or its declaration.
+# Keep this until an upstream package fixes it; validate the generated archive.
+pre_install do |installer|
+  installer.pod_targets.each do |target|
+    target.specs.each do |spec|
+      next unless spec.name == 'geocoding_ios'
+      resources = spec.attributes_hash['resource_bundles'] || {}
+      legacy = 'geocoding_ios/Sources/PrivacyInfo.xcprivacy'
+      corrected = 'geocoding_ios/Sources/geocoding_ios/PrivacyInfo.xcprivacy'
+      next unless resources['geocoding_ios_privacy'] == [legacy]
+      manifest = installer.sandbox.pod_dir('geocoding_ios').join(corrected)
+      raise 'Expected geocoding_ios privacy manifest is missing; review package resources' unless manifest.file?
+      spec.resource_bundles = resources.merge('geocoding_ios_privacy' => [corrected])
+    end
+  end
+end
+
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    # The app requests location only while in use. Do not compile the plugin's
+    # always-location permission path or add background location capabilities.
+    if target.name == 'geolocator_apple'
+      target.build_configurations.each do |config|
+        definitions = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
+        definitions = [definitions] unless definitions.is_a?(Array)
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] =
+          (definitions + ['BYPASS_PERMISSION_LOCATION_ALWAYS=1']).uniq
+      end
+    end
   end
 end

@@ -1,60 +1,154 @@
-# 지역 기반 1:1 유료 Q&A 컨시어지 MVP
+# DaisyOne-Malaga
 
-Flutter, Riverpod, GoRouter, Supabase로 만든 모바일 우선 MVP입니다.
+유럽·미국 주요 도시를 대상으로 준비 중인 여행자·로컬 가이드 1:1 Q&A 앱입니다.
+`DaisyOne-Malaga`는 작업 위치에서 유래한 저장소 이름이며, 서비스 이름은 아직 정하지 않았습니다. 기존 Flutter 화면과 이용 흐름을
+유지하면서 서버를 **자가 호스팅 Node.js + PostgreSQL**로 옮겼습니다.
+관리형 SQL 서비스, Supabase 계정, 실제 결제 서비스는 필요하지 않습니다.
 
-## 포함된 범위
+## 화면 개선
 
-- 이메일 회원가입/로그인
-- 사용자 프로필 자동 생성 및 mock 포인트 지급
-- 질문 등록, 목록, 상세
-- Supabase Storage 기반 질문 이미지 업로드
-- 답변자 신청 및 관리자 승인/거절
-- 승인 답변자만 가능한 1:1 질문 수락
-- 근거 URL 필수 답변 제출
-- 질문자 답변 채택 및 mock 포인트 보상
-- 포인트 거래 내역
+여백·글자 계층·절제된 파란 행동색을 중심으로 로그인, 지도, 질문 작성,
+가이드와 프로필을 다듬었습니다. [UI 변경과 검증](docs/UI_UPDATE.md)을 참고하세요.
 
-## Supabase 설정
+## 이번 개선
 
-1. Supabase 프로젝트를 생성합니다.
-2. `supabase/migrations/202607040001_initial_mvp.sql`을 SQL Editor에서 실행합니다.
-3. 실제 스페인 지도 좌표를 쓰려면 `supabase/migrations/202607070001_spain_map_coordinates.sql`도 이어서 실행합니다.
-4. 질문과 답변을 자동 갱신하려면 `supabase/migrations/202607120001_enable_question_realtime.sql`을 실행합니다.
-5. 첫 관리자 계정으로 로그인한 뒤 SQL Editor에서 해당 사용자를 관리자로 지정합니다.
+- 가이드 답변도 계정·질문별로 임시 저장합니다. 제출 결과가 불확실하면
+  같은 내용·요청 번호를 유지해 재시도하고, 복원한 미제출 답변은 확인 항목을 다시 선택합니다.
+- 내용 목록·상세의 JSON 전송을 압축하고, 만료된 로그인 자료를 작은 묶음으로
+  정리합니다. 인증·사진·내보내기는 압축 대상에서 제외합니다.
+- GPS 권한이 없거나 여행지 밖에 있어도 도시를 직접 골라 질문합니다.
+  지도는 선택해서 열며 텍스트 작성이 먼저 가능합니다.
+- 여행 질문 예시와 계정별 기기 내 텍스트 초안을 제공합니다. 불확실한 전송은
+  같은 작업 ID로 확인/재시도하며, 사진 복원 제한은 별도로 안내합니다.
+- 가이드는 실제 채택된 답변 수와 받은/대기 중 가상 포인트를 보고,
+  본인 활동 지역에서 수락 가능한 질문을 확인합니다.
+- 중복 클릭, 통신 중단, 계정 전환, 동시 수락과 환불을 서버와 클라이언트에서
+  함께 방어합니다. 연결 장애로 기억한 로그인을 무조건 지우지 않습니다.
 
-```sql
-update public.users
-set is_admin = true
-where email = 'admin@example.com';
+도시별 후보 목록과 변경 방법은 [도시 범위](docs/CITY_COVERAGE.md)에 있습니다.
+목록에 포함된 도시가 실제 운영 중이거나 가이드가 대기 중이라는 뜻은 아닙니다.
+
+## 핵심 흐름
+
+1. 가입/로그인 후 테스트 포인트를 받습니다.
+2. 지도에서 지역을 골라 질문을 등록하면 보상 포인트가 보관됩니다.
+3. 해당 지역의 승인된 답변자가 질문을 수락합니다.
+4. 답변자는 HTTP(S) 근거 링크와 함께 답변합니다.
+5. 질문자가 채택하면 답변자에게 포인트가 한 번만 지급됩니다.
+6. 아직 수락되지 않은 질문은 취소하고 포인트를 돌려받을 수 있습니다.
+
+이미지, 댓글, 답변자 신청/관리자 심사, 프로필, 포인트 내역도 포함합니다.
+모든 포인트는 가상 값이며 충전 결제·현금 인출은 구현하지 않았습니다.
+
+## 개발 실행
+
+PostgreSQL 15+, Node.js 22+, Flutter(Dart 3.10 이상)가 필요합니다.
+이번 검증 환경은 Flutter 3.47.5 / Dart 3.13.4 / PostgreSQL 17.11입니다.
+
+```sh
+cd backend
+npm ci
+cp .env.example .env
+# .env의 DATABASE_URL을 로컬 개발 데이터베이스로 지정
+npm run migrate
+ALLOW_DEV_SEED=true npm run seed:dev  # 선택: 격리된 테스트 DB에서만
+npm start
 ```
 
-### 개발용 로그인 shortcut 계정
+별도 터미널에서:
 
-로그인 화면의 개발용 shortcut 버튼을 바로 쓰려면 Supabase SQL Editor에서 아래 파일을 실행합니다.
-기존 개발용 계정이 꼬였을 때도 같은 파일을 다시 실행하면 5개 계정만 정리 후 재생성합니다.
-실행 후 마지막 결과 표의 세 boolean 컬럼이 모두 `true`인지 확인합니다.
-
-SQL Editor에 아래 파일 전체를 붙여넣고 그대로 실행합니다.
-개발용 shortcut 계정의 비밀번호는 `daisy-dev-1234`로 고정되어 있습니다.
-
-```text
-supabase/migrations/202607080001_dev_login_shortcuts.sql
+```sh
+flutter pub get
+flutter run -d chrome \
+  --dart-define=API_BASE_URL=http://localhost:8080/api \
+  --dart-define=ENABLE_DEV_LOGIN=true
 ```
 
-디버그 실행에서는 별도 비밀번호 옵션 없이 shortcut 버튼이 표시됩니다.
-
-## 실행
-
-```bash
-flutter run \
-  --dart-define=SUPABASE_URL=https://YOUR_PROJECT.supabase.co \
-  --dart-define=SUPABASE_ANON_KEY=YOUR_ANON_KEY
-```
+서버 운영 및 이미지/DB 백업 안내는 [SELF_HOSTING](docs/SELF_HOSTING.md)에 있습니다.
+기존 `supabase/migrations/`는 이전 버전 참고용으로 보존했습니다. 새 서버에는
+`backend/migrations/`만 적용합니다. 기존 운영 데이터 가져오기는 별도 검토가
+필요하며 자동 실행하지 않습니다.
 
 ## 검증
 
-```bash
+전체 개발 검사를 재현하려면 `bash scripts/verify-local.sh`를 실행합니다.
+설치 경로가 다르면 `FLUTTER_BIN`, `PG_BIN`, `PG_SHARE`를 지정하세요.
+결과는 `.verification/`에 저장되며 운영 DB에 연결하지 않습니다. Unix 소켓이
+없는 실행 환경은 `TEST_PG_TCP=1`을 지정할 수 있습니다. 이 명령의 개발 검사
+통과와 App Store 제출 준비 완료는 별개이며, 남은 출시 조건을 별도로 출력합니다.
+
+```sh
 flutter analyze
 flutter test
+flutter build web --release --dart-define=API_BASE_URL=/api
+cd backend
+npm run check
+TEST_DATABASE_URL=postgresql://YOUR_TEST_DB npm test
 ```
-# DaisyOne-Malaga
+
+통합 테스트에는 **실제 PostgreSQL 테스트 데이터베이스**를 지정해야 합니다.
+운영 DB를 사용하지 마세요. 테스트가 만든 고유 스키마만 정리합니다.
+브라우저 프리뷰의 로컬 저장소는 이 실제 PostgreSQL 통합 검증을 대체하지 않습니다.
+
+### 출시 준비 개선
+
+- 비밀번호 복구와 이메일 인증을 추가했습니다. 인증 코드는 한 번만 사용되며
+  비밀번호를 바꾸면 기존 세션이 종료됩니다. 로컬 테스트 메일함으로 검증했고,
+  실제 이메일 전송은 운영자가 소유한 메일 시스템을 연결해야 합니다.
+- 계정 설정에서 재인증 후 내 데이터를 내보내거나 계정을 삭제합니다.
+  삭제는 본인 콘텐츠·세션·사진과 신고 데이터를 정리하며, 파일 삭제 실패는
+  서버 작업으로 재시도합니다. 큰 내보내기는 조용히 잘라내지 않고 제한을 안내합니다.
+- 질문·답변·댓글에서 신고 및 작성자 차단, 관리자 신고 검토·숨김·정지를 제공합니다.
+  이 기능 자체가 운영 인력이나 신고 처리 시간을 보장하지는 않습니다.
+- 모바일 로그인 토큰은 보안 저장소를 사용합니다. 새 사진은 메타데이터를
+  제거하고 방향을 유지한 뒤 저장하며, 잘못된 이미지·과도한 크기를 거절합니다.
+- iOS 권한·개인정보 리소스와 배포 전 검사를 정리했습니다. Linux 검증은
+  서명된 iOS 빌드, 실제 기기와 App Store 심사를 대체하지 않습니다.
+
+최종 실행 수치와 검증 범위는 [VERIFICATION](docs/VERIFICATION.md)에 기록합니다.
+재현 가능한 실제 PostgreSQL 검사는 로컬 PostgreSQL이 설치된 환경에서 다음과 같이 실행합니다.
+
+```sh
+bash scripts/test-postgres-local.sh
+# Unix 소켓을 지원하지 않는 클라우드 실행 환경:
+TEST_PG_TCP=1 bash scripts/test-postgres-local.sh
+```
+
+이 스크립트는 임시 테스트 클러스터와 권한이 제한된 테스트 계정을 만들고,
+종료 시 자신이 만든 테스트 자료만 정리합니다. `PG_BIN`, `PG_SHARE`로 설치
+경로를 지정할 수 있습니다. 운영 데이터베이스에는 연결하지 않습니다.
+
+## 프리뷰와 실제 서버의 구분
+
+개인 개발 프리뷰는 같은 API 계약을 따르는 **별도 브라우저 전용 테스트 데이터
+구현**입니다. 운영용 PostgreSQL이나 SQL을 브라우저에서 실행하지 않습니다.
+데이터는 해당 브라우저에만 저장되며 여러 기기·사용자 간에 공유되지 않습니다. 개인정보나 실제 서비스 데이터를 입력하지 마세요. 실제 서비스 코드는
+별도의 Node.js API와 PostgreSQL 서버로 실행합니다.
+
+이 저장소는 자가 호스팅 가능한 개발 버전입니다. App Store 제출 준비가
+끝났다는 뜻은 아닙니다. [출시 준비 점검표](docs/APP_STORE_READINESS.md)의
+미해결 항목과 실제 검증 결과를 함께 확인하세요.
+
+### 실제 출시 전 남은 항목
+
+- 서비스 이름·아이콘·소유한 번들 ID와 기존 Apple 개발자 계정을 사용할 승인된 macOS 빌드/서명 경로
+- 실제 HTTPS 서버, 메일 전달, 백업 복구와 모니터링 검증
+- 개인정보 처리방침·이용약관·지원 연락처와 신고 처리 인력/운영 기준
+- 최종 iOS 의존성·개인정보 보고서, 서명·실물 iPhone/iPad·VoiceOver·Safari 검증
+- 초기 모델은 구매·현금화 없는 가상 포인트와 실제 채택 기록으로 결정했습니다. 도시별 개시 순서·무료 포인트 배분·미답변·분쟁·반환 정책은 남아 있습니다.
+
+검사 스크립트는 미정인 출시 설정을 실패로 표시합니다. 의사결정이나 실제
+서비스를 만들지 않고 검사만 통과시키는 기본값을 넣지 않습니다.
+
+- [계정 서버·메일·삭제·내보내기](docs/ACCOUNT_BACKEND.md)
+- [계정 화면·보안 저장·실패 복구](docs/ACCOUNT_LIFECYCLE.md)
+- [신고·차단·검토와 운영 결정](docs/MODERATION_READINESS.md)
+
+## 여행자 검증과 운영 제안
+
+- [실제 이용·실패 복구 시나리오](docs/TRAVELER_SCENARIOS.md)
+- [검증 결과와 검증하지 않은 범위](docs/VERIFICATION.md)
+- [답변자 공급 부족을 고려한 초기 운영 제안](docs/TRAVELER_AND_GUIDE_PLAN.md)
+
+운영 시간, 응답 보장, 자동 만료/환불 기한, 가이드 모집·정산은 이 문서의
+제안만으로 확정되지 않습니다. 실제 금전 지급은 구현하지 않았습니다.

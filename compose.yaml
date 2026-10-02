@@ -1,0 +1,70 @@
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: malaga
+      POSTGRES_USER: malaga_owner
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your local environment}
+      APP_DATABASE_PASSWORD: ${APP_DATABASE_PASSWORD:?Set a separate runtime database password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/init-runtime-role.sh:/docker-entrypoint-initdb.d/10-runtime-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U malaga_owner -d malaga"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Intentionally no host database port. Only the API container can reach it.
+
+  migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: postgresql://malaga_owner:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@db:5432/malaga
+    command: ["node", "src/migrate.mjs"]
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://malaga_app:${APP_DATABASE_PASSWORD:?Set APP_DATABASE_PASSWORD}@db:5432/malaga
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 8080
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:?Set your HTTPS API origin}
+      CORS_ORIGINS: ${CORS_ORIGINS:?Set the exact Flutter web origin}
+      IMAGE_SIGNING_SECRET: ${IMAGE_SIGNING_SECRET:?Set a random image signing secret}
+      UPLOAD_DIR: /app/data/uploads
+      INITIAL_MOCK_POINTS: 1000
+      ALLOW_DEV_SEED: "false"
+      MAIL_MODE: sendmail
+      MAIL_FROM: ${MAIL_FROM:?Set the operator-owned account mail sender}
+      SENDMAIL_PATH: ${SENDMAIL_PATH:-/usr/sbin/sendmail}
+      ACCOUNT_ACTION_URL: ${ACCOUNT_ACTION_URL:?Set the HTTPS account action URL}
+      EMAIL_VERIFICATION_POLICY: ${EMAIL_VERIFICATION_POLICY:?Choose optional or required_for_contributions}
+      # Supply a reviewed local MTA integration in the API image/environment.
+      # The bundled Node base image does not contain an outbound mail service.
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - image_data:/app/data/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  postgres_data:
+  image_data:

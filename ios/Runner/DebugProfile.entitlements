@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- flutter_secure_storage: use this application's default Keychain access.
+	     No cross-app sharing group or iCloud synchronization is requested. -->
+	<key>keychain-access-groups</key>
+	<array/>
+</dict>
+</plist>

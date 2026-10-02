@@ -1,22 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/app.dart';
-import 'core/constants/app_config.dart';
-import 'core/services/supabase_service.dart';
+import 'features/account/export_file.dart';
 
-Future<void> main() async {
+void main() {
   WidgetsFlutterBinding.ensureInitialized();
-
-  if (!AppConfig.hasSupabaseConfig) {
-    runApp(const MissingConfigApp());
-    return;
-  }
-
-  await SupabaseService.initialize(
-    url: AppConfig.supabaseUrl,
-    publishableKey: AppConfig.supabaseAnonKey,
+  // Remove only this feature's abandoned private export files. Failure must not
+  // delay or block sign-in; export creation also retries scoped cleanup.
+  unawaited(
+    cleanupAccountExportFiles()
+        .timeout(const Duration(seconds: 3))
+        .catchError((Object _) {}),
   );
-
   runApp(const ProviderScope(child: ConciergeApp()));
 }

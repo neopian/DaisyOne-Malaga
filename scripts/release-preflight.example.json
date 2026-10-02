@@ -1,0 +1,27 @@
+{
+  "app": {
+    "display_name": "",
+    "bundle_id": "",
+    "apple_team_id": ""
+  },
+  "dart_defines": {
+    "API_BASE_URL": "",
+    "PRIVACY_POLICY_URL": "",
+    "SUPPORT_URL": "",
+    "TERMS_URL": "",
+    "COMMUNITY_GUIDELINES_URL": "",
+    "SUPPORT_EMAIL": "",
+    "DEMO_MODE": false,
+    "ENABLE_DEV_LOGIN": false,
+    "QA_AUTO_LOGIN": false
+  },
+  "backend": {
+    "NODE_ENV": "production",
+    "PUBLIC_BASE_URL": "",
+    "ALLOW_DEV_SEED": false,
+    "MAIL_MODE": "sendmail",
+    "MAIL_FROM": "",
+    "ACCOUNT_ACTION_URL": "",
+    "EMAIL_VERIFICATION_POLICY": ""
+  }
+}

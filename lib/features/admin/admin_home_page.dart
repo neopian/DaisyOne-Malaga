@@ -38,19 +38,13 @@ class AdminHomePage extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              const Card(
+              Card(
                 child: ListTile(
-                  leading: Icon(Icons.report_outlined),
-                  title: Text('신고 관리'),
-                  subtitle: Text('후속 단계에서 활성화됩니다'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              const Card(
-                child: ListTile(
-                  leading: Icon(Icons.gavel_outlined),
-                  title: Text('패널티 관리'),
-                  subtitle: Text('후속 단계에서 활성화됩니다'),
+                  leading: const Icon(Icons.report_outlined),
+                  title: const Text('신고 검토'),
+                  subtitle: const Text('콘텐츠와 사용자 신고를 확인하고 조치합니다'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => context.go('/admin/reports'),
                 ),
               ),
             ],

@@ -12,6 +12,17 @@ class StatusChip extends StatelessWidget {
   final bool emphasis;
   final bool compact;
 
+  String get _displayLabel =>
+      const {
+        'open': '답변자 기다리는 중',
+        'assigned': '답변 준비 중',
+        'answered': '답변 도착',
+        'accepted': '채택 완료',
+        'cancelled': '취소됨',
+        'expired': '기한 종료',
+      }[label] ??
+      label;
+
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -24,34 +35,33 @@ class StatusChip extends StatelessWidget {
 
     if (compact) {
       return Container(
-        height: 28,
-        padding: const EdgeInsets.symmetric(horizontal: 10),
-        alignment: Alignment.center,
+        constraints: const BoxConstraints(minHeight: 28),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
           color: backgroundColor,
           borderRadius: BorderRadius.circular(999),
         ),
         child: Text(
-          label,
-          maxLines: 1,
-          softWrap: false,
+          _displayLabel,
+          maxLines: 2,
+          softWrap: true,
           style: TextStyle(
             color: foregroundColor,
             fontSize: 12,
-            fontWeight: FontWeight.w700,
+            fontWeight: FontWeight.w500,
           ),
         ),
       );
     }
 
     return Chip(
-      label: Text(label),
+      label: Text(_displayLabel),
       visualDensity: VisualDensity.compact,
       side: BorderSide.none,
       backgroundColor: backgroundColor,
       labelStyle: TextStyle(
         color: foregroundColor,
-        fontWeight: FontWeight.w700,
+        fontWeight: FontWeight.w500,
       ),
     );
   }

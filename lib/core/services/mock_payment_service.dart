@@ -1,46 +1,17 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'api_service.dart';
 import 'payment_service.dart';
-import 'supabase_service.dart';
 
-final paymentServiceProvider = Provider<PaymentService>((ref) {
-  return MockPaymentService(ref.watch(supabaseClientProvider));
-});
+final paymentServiceProvider = Provider<PaymentService>(
+  (ref) => MockPaymentService(ref.watch(apiClientProvider)),
+);
 
 class MockPaymentService implements PaymentService {
   const MockPaymentService(this._client);
-
-  final dynamic _client;
-
+  final ApiClient _client;
   @override
-  Future<void> grantMockCharge({
-    required String userId,
-    required int amount,
-  }) async {
-    await _client
-        .from('users')
-        .update({'point_balance': amount})
-        .eq('id', userId);
-    await _client.from('point_transactions').insert({
-      'user_id': userId,
-      'type': 'charge_mock',
-      'amount': amount,
-    });
-  }
-
-  @override
-  Future<void> refundQuestion({
-    required String userId,
-    required String questionId,
-    required int amount,
-  }) async {
-    await _client.rpc(
-      'refund_question',
-      params: {
-        'p_user_id': userId,
-        'p_question_id': questionId,
-        'p_amount': amount,
-      },
-    );
+  Future<void> refundQuestion({required String questionId}) async {
+    await _client.mutate('questions/${Uri.encodeComponent(questionId)}/cancel');
   }
 }

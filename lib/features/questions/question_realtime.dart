@@ -1,65 +1,56 @@
 import 'dart:async';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../core/services/supabase_service.dart';
+import '../auth/auth_repository.dart';
+import '../helper_application/helper_repository.dart';
 import '../profile/profile_repository.dart';
 import 'question_repository.dart';
 
+/// Shared by visible question pages. Stops in background and on disposal.
 final questionRealtimeProvider = Provider.autoDispose<void>((ref) {
-  final client = ref.watch(supabaseClientProvider);
-  Timer? refreshTimer;
-
-  void refreshQuestions() {
-    refreshTimer?.cancel();
-    refreshTimer = Timer(const Duration(milliseconds: 250), () {
-      ref.invalidate(questionsProvider);
-      ref.invalidate(helperOpenQuestionsProvider);
-      ref.invalidate(questionProvider);
-      ref.invalidate(currentProfileProvider);
-    });
+  final auth = ref.watch(authRepositoryProvider);
+  void refresh() {
+    if (auth.currentUser == null) return;
+    ref.invalidate(questionsProvider);
+    ref.invalidate(helperOpenQuestionsProvider);
+    ref.invalidate(questionProvider);
+    ref.invalidate(currentProfileProvider);
+    ref.invalidate(pointTransactionsProvider);
+    ref.invalidate(helperApplicationProvider);
+    ref.invalidate(guideSummaryProvider);
   }
 
-  final channel = client
-      .channel('question-workflow')
-      .onPostgresChanges(
-        event: PostgresChangeEvent.all,
-        schema: 'public',
-        table: 'questions',
-        callback: (_) => refreshQuestions(),
-      )
-      .onPostgresChanges(
-        event: PostgresChangeEvent.all,
-        schema: 'public',
-        table: 'answers',
-        callback: (_) => refreshQuestions(),
-      )
-      .onPostgresChanges(
-        event: PostgresChangeEvent.all,
-        schema: 'public',
-        table: 'question_comments',
-        callback: (_) => refreshQuestions(),
-      )
-      .onPostgresChanges(
-        event: PostgresChangeEvent.all,
-        schema: 'public',
-        table: 'question_images',
-        callback: (_) => refreshQuestions(),
-      )
-      .subscribe((status, _) {
-        if (status == RealtimeSubscribeStatus.subscribed) {
-          refreshQuestions();
-        }
-      });
-  final syncTimer = Timer.periodic(
-    const Duration(seconds: 15),
-    (_) => refreshQuestions(),
-  );
-
+  final observer = ForegroundPoller(refresh);
+  WidgetsBinding.instance.addObserver(observer);
+  observer.start(WidgetsBinding.instance.lifecycleState);
   ref.onDispose(() {
-    refreshTimer?.cancel();
-    syncTimer.cancel();
-    unawaited(client.removeChannel(channel));
+    observer.dispose();
+    WidgetsBinding.instance.removeObserver(observer);
   });
 });
+
+class ForegroundPoller extends WidgetsBindingObserver {
+  ForegroundPoller(this.refresh, {this.interval = const Duration(seconds: 15)});
+  final VoidCallback refresh;
+  final Duration interval;
+  Timer? _timer;
+  bool get isRunning => _timer?.isActive ?? false;
+  void start(AppLifecycleState? state) {
+    _timer?.cancel();
+    if (state == null || state == AppLifecycleState.resumed) {
+      _timer = Timer.periodic(interval, (_) => refresh());
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    start(state);
+    if (state == AppLifecycleState.resumed) refresh();
+  }
+
+  void dispose() {
+    _timer?.cancel();
+  }
+}
